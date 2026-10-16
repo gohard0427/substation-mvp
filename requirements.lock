@@ -1,0 +1,2 @@
+# Runtime dependency lock. Pillow has no required Python transitive dependencies.
+Pillow==12.3.0

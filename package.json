@@ -1,0 +1,15 @@
+{
+  "name": "substation-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "전력설비 작업 사진 명판 생성 — Python 서버와 한국어 웹 화면",
+  "scripts": {
+    "start": "python server.py",
+    "test": "python -m unittest discover -s tests -v && node tests/test_frontend.cjs",
+    "test:frontend": "node tests/test_frontend.cjs",
+    "check": "node --check static/app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

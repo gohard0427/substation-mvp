@@ -1,0 +1,17 @@
+data/
+.env
+__pycache__/
+*.pyc
+
+.env.*
+!.env.example
+node_modules/
+.venv/
+venv/
+.pytest_cache/
+*.zip
+*.sqlite
+*.sqlite3
+*.db
+*.pem
+*.key
