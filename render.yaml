@@ -1,0 +1,36 @@
+# A real deploy creates paid compute + a persistent disk. Review charges first.
+# This blueprint is deployment-ready source; it does not create resources itself.
+services:
+  - type: web
+    name: substation-mvp-api
+    runtime: docker
+    repo: https://github.com/gohard0427/substation-mvp
+    branch: main
+    plan: starter
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    disk:
+      name: substation-work-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: DEPLOYMENT_MODE
+        value: "1"
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: DATA_DIR
+        value: /var/data
+      - key: MAX_UPLOAD_BYTES
+        value: "94371840"
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: WORKER_PASSWORD
+        sync: false
+      - key: EDGE_PROXY_SECRET
+        sync: false
+      - key: OPENAI_VISION_MODEL
+        value: gpt-4.1-mini
+      - key: AI_DAILY_LIMIT
+        value: "100"

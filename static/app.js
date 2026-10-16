@@ -233,7 +233,7 @@ $('#saveGroups').onclick = run(async () => {
   });
   const saved = await api('/api/ambiguity-groups', {groups}); settings.ambiguityGroups = saved.groups; renderGroups(); update(); notice('구분 필요 그룹을 저장했습니다. 현재 사진에도 새 규칙이 적용됩니다.');
 });
-boot().catch(() => {});
+boot().catch(error => { if (error.status !== 401) notice(error.message); });
 
 $('#changeWorkerPassword').onclick = run(async () => { await api('/api/worker-password', {password:$('#newWorkerPassword').value}); $('#newWorkerPassword').value = ''; notice('공용 비밀번호를 변경하고 기존 작업자 세션을 종료했습니다.'); });
 

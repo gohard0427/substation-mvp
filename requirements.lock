@@ -1,2 +1,10 @@
-# Runtime dependency lock. Pillow has no required Python transitive dependencies.
+# Locked runtime for Python 3.11+ (Linux and Windows).
 Pillow==12.3.0
+starlette==1.6.0
+uvicorn==0.52.1
+anyio==4.14.2
+click==8.4.2
+h11==0.16.0
+idna==3.18
+typing_extensions==4.16.0
+colorama==0.4.6; platform_system == "Windows"

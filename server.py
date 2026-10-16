@@ -8,14 +8,14 @@ import vision
 ROOT=Path(__file__).parent
 DATA=Path(os.environ.get('DATA_DIR',ROOT/'data')); DATA.mkdir(exist_ok=True)
 FONT=os.environ.get('KOREAN_FONT','/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc')
-MAX_UPLOAD=200*1024*1024; MAX_TOTAL=1024*1024*1024; MAX_FILES=2000
+MAX_UPLOAD=int(os.environ.get('MAX_UPLOAD_BYTES',str(200*1024*1024))); MAX_TOTAL=1024*1024*1024; MAX_FILES=2000
 Image.MAX_IMAGE_PIXELS=40_000_000
 LOCK=threading.RLock()
 def db():
  c=sqlite3.connect(DATA/'app.db'); c.row_factory=sqlite3.Row; return c
 def init():
  with db() as c:
-  c.executescript('''CREATE TABLE IF NOT EXISTS app_config(key TEXT PRIMARY KEY,payload TEXT NOT NULL);CREATE TABLE IF NOT EXISTS ai_calls(id TEXT PRIMARY KEY,created REAL NOT NULL,status TEXT NOT NULL);CREATE TABLE IF NOT EXISTS credentials(role TEXT PRIMARY KEY,salt TEXT NOT NULL,password_hash TEXT NOT NULL);CREATE TABLE IF NOT EXISTS ambiguity_groups(id TEXT PRIMARY KEY,payload TEXT NOT NULL);CREATE TABLE IF NOT EXISTS logins(token TEXT PRIMARY KEY,role TEXT,expires REAL); CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,device TEXT,state TEXT,updated REAL,payload TEXT); CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY,project TEXT); INSERT OR IGNORE INTO settings VALUES(1,'전력설비 점검 및 정비공사');''')
+  c.executescript('''CREATE TABLE IF NOT EXISTS login_attempts(identity_hash TEXT NOT NULL,created REAL NOT NULL);CREATE INDEX IF NOT EXISTS login_attempts_lookup ON login_attempts(identity_hash,created);CREATE TABLE IF NOT EXISTS app_config(key TEXT PRIMARY KEY,payload TEXT NOT NULL);CREATE TABLE IF NOT EXISTS ai_calls(id TEXT PRIMARY KEY,created REAL NOT NULL,status TEXT NOT NULL);CREATE TABLE IF NOT EXISTS credentials(role TEXT PRIMARY KEY,salt TEXT NOT NULL,password_hash TEXT NOT NULL);CREATE TABLE IF NOT EXISTS ambiguity_groups(id TEXT PRIMARY KEY,payload TEXT NOT NULL);CREATE TABLE IF NOT EXISTS logins(token TEXT PRIMARY KEY,role TEXT,expires REAL); CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,device TEXT,state TEXT,updated REAL,payload TEXT); CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY,project TEXT); INSERT OR IGNORE INTO settings VALUES(1,'전력설비 점검 및 정비공사');''')
  with db() as c:
   c.execute('INSERT OR IGNORE INTO app_config VALUES(?,?)',('workTypes',json.dumps(['대상 기기','작업 전','작업 후','분리','조립','청소','점검','교체','동작특성 시험','코일 저항 측정','PMA 전압 측정'],ensure_ascii=False)))
   initial={'id':'pma-measurement','name':'PMA 타입 GIS 측정','equipmentMatch':'PMA','options':['코일 저항 측정','PMA 전압 측정'],'reason':'측정 위치 및 계측기 동일','required':True}
@@ -52,6 +52,7 @@ def validate_photos(photos):
   datetime.date.fromisoformat(p['date'])
   if not ambiguity_resolved(p,ambiguity_group(p,groups)): raise ValueError('구분 필요 작업을 사진별로 직접 선택하세요')
 class ConflictError(ValueError): pass
+class LoginLimitError(ValueError): pass
 
 def verify_password(role,password):
  with db() as c: row=c.execute('SELECT salt,password_hash FROM credentials WHERE role=?',(role,)).fetchone()
@@ -59,7 +60,7 @@ def verify_password(role,password):
   calculated=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(row['salt']),600000).hex()
   return hmac.compare_digest(calculated,row['password_hash'])
  expected=os.environ.get('ADMIN_PASSWORD' if role=='admin' else 'WORKER_PASSWORD','')
- return bool(expected) and hmac.compare_digest(password,expected)
+ return bool(expected) and hmac.compare_digest(password.encode(),expected.encode())
 def change_worker_password(password):
  if not isinstance(password,str) or not 12<=len(password)<=128: raise ValueError('비밀번호는 12~128자로 설정하세요')
  salt=secrets.token_bytes(16); value=hashlib.pbkdf2_hmac('sha256',password.encode(),salt,600000).hex()
@@ -93,7 +94,10 @@ def cleanup():
   expired=c.execute('SELECT id FROM jobs WHERE updated<?',(time.time()-86400,)).fetchall()
   import shutil
   for row in expired: shutil.rmtree(DATA/row['id'],ignore_errors=True)
-  c.execute('DELETE FROM jobs WHERE updated<?',(time.time()-86400,)); c.execute('DELETE FROM logins WHERE expires<?',(time.time(),))
+  c.execute('DELETE FROM jobs WHERE updated<?',(time.time()-86400,)); c.execute('DELETE FROM logins WHERE expires<?',(time.time(),)); c.execute('DELETE FROM login_attempts WHERE created<?',(time.time()-86400,))
+  known={row[0] for row in c.execute('SELECT id FROM jobs')}
+  for folder in DATA.iterdir():
+   if folder.is_dir() and folder.name not in known and folder.stat().st_mtime<time.time()-86400: shutil.rmtree(folder,ignore_errors=True)
 def load_job(jid,device):
  with db() as c: row=c.execute('SELECT * FROM jobs WHERE id=? AND device=?',(jid,digest(device))).fetchone()
  if not row or row['updated']<time.time()-86400: raise ValueError('작업 권한이 없거나 만료되었습니다')
@@ -136,6 +140,9 @@ class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args): pass
  def reply(self,obj,status=200):
   raw=json.dumps(obj,ensure_ascii=False).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(raw)
+ def require_proxy(self):
+  secret=os.environ.get('EDGE_PROXY_SECRET','')
+  if secret and not hmac.compare_digest(self.headers.get('X-Edge-Proxy-Secret','').encode(),secret.encode()): raise PermissionError('허용되지 않은 서버 접근입니다')
  def auth(self,admin=False):
   cookie=SimpleCookie(self.headers.get('Cookie','')); tok=cookie.get('session'); dev=cookie.get('device')
   with db() as c: row=c.execute('SELECT role FROM logins WHERE token=? AND expires>?',(digest(tok.value) if tok else '',time.time())).fetchone()
@@ -149,6 +156,7 @@ class Handler(BaseHTTPRequestHandler):
   try:
    path=self.path.split('?')[0]
    if path.startswith('/api/'):
+    self.require_proxy()
     dev=self.auth()
     if path=='/api/jobs':
      cleanup()
@@ -203,9 +211,17 @@ class Handler(BaseHTTPRequestHandler):
    origin=self.headers.get('Origin')
    if origin and origin.split('://')[-1]!=self.headers.get('Host'): raise PermissionError('허용되지 않은 요청')
    path=self.path.split('?')[0]
+   self.require_proxy()
    if path=='/api/login':
     data=json.loads(self.body()); role=data.get('role','worker')
-    if role not in ['worker','admin'] or not isinstance(data.get('password'),str) or len(data['password'])>128 or not verify_password(role,data['password']): raise PermissionError('비밀번호를 확인하세요')
+    client_ip=self.headers.get('X-Edge-Client-IP','unknown') if os.environ.get('EDGE_PROXY_SECRET') else self.client_address[0]
+    identity=digest(str(client_ip)+':'+str(role))
+    with db() as c: attempts=c.execute('SELECT count(*) FROM login_attempts WHERE identity_hash=? AND created>?',(identity,time.time()-600)).fetchone()[0]
+    if attempts>=int(os.environ.get('LOGIN_MAX_ATTEMPTS','10')): raise LoginLimitError('로그인 시도가 많습니다. 10분 후 다시 시도하세요')
+    if role not in ['worker','admin'] or not isinstance(data.get('password'),str) or len(data['password'])>128 or not verify_password(role,data['password']):
+     with db() as c:c.execute('INSERT INTO login_attempts VALUES(?,?)',(identity,time.time()))
+     raise PermissionError('비밀번호를 확인하세요')
+    with db() as c:c.execute('DELETE FROM login_attempts WHERE identity_hash=?',(identity,))
     token=secrets.token_urlsafe(32); cookie=SimpleCookie(self.headers.get('Cookie','')); device=cookie['device'].value if 'device' in cookie else secrets.token_urlsafe(32)
     with db() as c: c.execute('INSERT INTO logins VALUES(?,?,?)',(digest(token),role,time.time()+43200))
     self.send_response(200)
@@ -316,9 +332,10 @@ class Handler(BaseHTTPRequestHandler):
     return self.reply({'ok':True})
    raise ValueError('잘못된 요청')
   except PermissionError as e: self.reply({'error':str(e)},401)
+  except LoginLimitError as e: self.reply({'error':str(e)},429)
   except ConflictError as e: self.reply({'error':str(e)},409)
   except Exception as e: self.reply({'error':str(e)},400)
-def generate(job,device_hash):
+def generate(job,device_hash,stop=None):
  try:
   validate_photos(job['photos'])
   with db() as c: project=c.execute('SELECT project FROM settings').fetchone()[0]
@@ -326,6 +343,8 @@ def generate(job,device_hash):
   photos=[p for p in job['photos'] if not p['excluded']]
   used=set(); failures=0
   for i,p in enumerate(photos):
+   if stop is not None and stop.is_set():
+    job['state']='queued';save_job_hashed(job,device_hash);return
    try:
     # Rendering cache is independent of confirmation/AI; only actual output inputs count.
     material={k:p.get(k) for k in ['date','location','equipment','work','rotation']}
@@ -351,10 +370,12 @@ def generate(job,device_hash):
   save_job_hashed(job,device_hash)
  except Exception as error:
   job['state']='failed'; job['error']=str(error); save_job_hashed(job,device_hash)
-def analyse_job(job,device_hash):
+def analyse_job(job,device_hash,stop=None):
  groups=ambiguity_groups(); works=work_types()
  failures=0; selected=[p for p in job['photos'] if not p['excluded']]
  for index,p in enumerate(selected):
+  if stop is not None and stop.is_set():
+   job['state']='analysis_queued';save_job_hashed(job,device_hash);return
   signature=digest(json.dumps([p['id'],p.get('rotation',0),p.get('equipmentType',''),p.get('hasExistingPlate',False),works,groups,vision.fingerprint_settings()],sort_keys=True,ensure_ascii=False))
   if p.get('analysisSignature')==signature and p.get('recommendation'):
    p['analysisStatus']='complete';p.pop('analysisError',None);job['analysisProgress']=index+1;continue
@@ -402,7 +423,7 @@ def worker_loop(stop):
     job=json.loads(row['payload']); job['state']='analysing' if job['state']=='analysis_queued' else 'generating'; save_job_hashed(job,row['device']); claimed=(job,row['device'])
   if claimed:
    try:
-    (analyse_job if claimed[0]['state']=='analysing' else generate)(*claimed)
+    (analyse_job if claimed[0]['state']=='analysing' else generate)(*claimed,stop=stop)
    except Exception:
     failed,device_hash=claimed;failed['state']='failed';failed['error']='처리 중 오류가 발생했습니다. 다시 요청하세요.';save_job_hashed(failed,device_hash)
   else: stop.wait(.25)
@@ -410,8 +431,9 @@ def start_worker():
  recover_queue(); stop=threading.Event()
  thread=threading.Thread(target=worker_loop,args=(stop,),daemon=True); thread.start()
  return stop,thread
-def janitor():
- while True:
-  cleanup(); time.sleep(60)
+def janitor(stop=None):
+ stop=stop or threading.Event()
+ while not stop.is_set():
+  cleanup(); stop.wait(60)
 if __name__=='__main__':
  init(); start_worker(); threading.Thread(target=janitor,daemon=True).start(); ThreadingHTTPServer(('0.0.0.0',int(os.environ.get('PORT',8000))),Handler).serve_forever()

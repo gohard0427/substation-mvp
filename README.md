@@ -2,6 +2,10 @@
 
 한국어 모바일 웹앱 초기 구현입니다. **운영 배포용 완제품은 아닙니다.** 비전 API 연결 코드는 있으나 실제 키가 없어 외부 API 호출·추천 정확도 평가는 수행하지 않았습니다.
 
+## 웹 주소로 사용하는 배포
+
+기존 앱과 같은 GitHub → Cloudflare Pages 연결을 위한 빌드·Functions와 Python 서버 배포 구성을 추가했습니다. 설정 순서는 **[Cloudflare·Python 서버 배포 안내](docs/CLOUDFLARE_SETUP.md)** 를 참고하세요. 계정에 실제 서비스를 생성하거나 배포 완료했다고 확인한 상태는 아닙니다. 이 구성은 영속 디스크가 필요하며 Render 사용 시 서버·디스크 요금 확인이 필요합니다.
+
 ## GitHub에서 Windows로 다운로드·실행
 
 저장소 화면에서 전달받은 브랜치를 먼저 선택하고 **Code → Download ZIP**을 누릅니다. ZIP을 압축 해제한 뒤 `server.py`와 `README.md`가 있는 폴더를 엽니다. 압축 폴더 안에서 바로 실행하지 마십시오.
@@ -23,15 +27,15 @@ $env:WORKER_PASSWORD = [System.Net.NetworkCredential]::new('', $workerSecret).Pa
 
 이 프로젝트의 실제 서버는 Python입니다. `requirements.lock`은 Python 런타임 의존성을 고정합니다. 요청하신 `package.json`·`package-lock.json`도 포함하며 선택적인 Node 검사/실행 명령을 제공합니다. npm 런타임 패키지 의존성은 없습니다. Next.js 프로젝트로 표시하지 않습니다.
 
-Cloudflare Pages에 정적 파일만 올려서는 로그인·업로드·AI·합성 기능이 실행되지 않습니다. 별도의 Python 백엔드 없이 화면만 배포한 주소를 완성된 앱으로 안내하지 않습니다. 현재 단계에서는 GitHub에서 다운로드하여 Windows에서 실행하는 흐름을 기준으로 합니다.
+Cloudflare Pages에 정적 파일만 올려서는 로그인·업로드·AI·합성 기능이 실행되지 않습니다. 별도의 Python 백엔드 없이 화면만 배포한 주소를 완성된 앱으로 안내하지 않습니다. 웹 배포는 위의 Cloudflare·Python 서버 연결 안내를, 로컬 실행은 이 절차를 사용합니다.
 
 ## Linux/macOS 로컬 실행
 
-Python 3.11+, Pillow, 한글 Noto Sans CJK Bold 폰트가 필요합니다. Linux Debian 계열 폰트 패키지는 `fonts-noto-cjk`입니다. 다른 OS는 `KOREAN_FONT` 환경변수로 폰트 경로를 지정하십시오.
+Python 3.11+, 잠금 파일의 Python 패키지, 한글 Noto Sans CJK Bold 폰트가 필요합니다. Linux Debian 계열 폰트 패키지는 `fonts-noto-cjk`입니다. 다른 OS는 `KOREAN_FONT` 환경변수로 폰트 경로를 지정하십시오.
 
 ```sh
 cd /workspace/substation
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.lock
 read -s -p '관리자 비밀번호: ' ADMIN_PASSWORD
 export ADMIN_PASSWORD
 read -s -p '작업자 비밀번호: ' WORKER_PASSWORD
@@ -101,7 +105,7 @@ python server.py
 - 업로드는 압축 파일 200MB, 해제 1GB, 최대 2,000개 항목, 사진당 30MB·4천만 픽셀, 최대 압축률 200배. 경로 탈출/절대 경로와 잘못된 실이미지 형식을 차단합니다.
 - 업로드 본문은 아직 서버 메모리에 적재합니다. 이 한도를 넘는 월 ZIP은 지원하지 않습니다. 업로드 재개·스트리밍 업로드/압축 해제·업로드 진행률은 미구현.
 - 대기열은 영속화했지만 **단일 서버 프로세스와 영속 로컬 디스크를 전제로 합니다.** 다중 worker/다중 인스턴스 lease·분산 잠금·운영 스케줄러는 아직 없습니다. 서버 시작 때 중단 작업의 복구 로직을 테스트했지만 실제 프로세스 강제 종료/재시작 내구성 시험은 별도 필요합니다.
-- 로그인 시도 제한, 운영용 ASGI 서버, 외부 인증 공급자, 감사 로그, 저장소 용량 할당량을 추가하기 전 공개 운영하지 마십시오.
+- ASGI/Uvicorn 실행, 중계 키 확인과 로그인 시도 제한을 추가했습니다. 외부 인증 공급자, 감사 로그, 저장소 용량 할당량 및 실제 외부 계정 검증은 여전히 남아 있습니다.
 - 만료 정리는 웹브라우저에 의존하지 않지만 서버가 중단된 동안 실행되지는 않습니다. 운영에서는 별도 상시 cron/worker가 필요합니다.
 
 ## 구조 및 데이터
@@ -109,24 +113,31 @@ python server.py
 - `static/`: 모바일 한국어 UI. 화면/관리자 기능은 API 권한과 별도로 서버에서 다시 검증.
 - `server.py`: HTTP API, SQLite, 파일 검증·합성·대기열·만료 삭제.
 - `vision.py`: OpenAI Responses API 어댑터. 비밀 키를 서버에서만 사용.
+- `asgi.py`, `Dockerfile`, `render.yaml`: 영속 디스크를 사용하는 별도 서버 배포 구성.
+- `scripts/build.mjs`, `functions/`, `cloudflare/`: Cloudflare Pages 빌드·서버 API 중계. 비밀 값은 정적 출력에 넣지 않습니다.
 - `data/app.db`: 로그인 해시, 비밀번호 재설정 해시, 기기별 작업 권한 해시/사진별 상태·추천·확정, 표준 작업/혼동 그룹, AI 호출 한도 기록.
 - `data/<무작위 작업 ID>/`: 원본, `outputs/` 사진별 JPEG 캐시, 결과 ZIP. 정적 경로로 제공하지 않음.
 - `migrations/001_proposed_postgres.sql`: 후속 Supabase 서버 전용 모델 초안이며 현재 SQLite와 자동 연동되지 않습니다.
 
 ## 테스트
 
+ASGI HTTP 테스트용 개발 의존성은 별도로 설치합니다.
+
 ```sh
+python -m pip install -r requirements-dev.lock
 python -m unittest discover -s tests -v
 node tests/test_frontend.cjs
+node tests/test_proxy.mjs
+npm run build
 node --check static/app.js
 ```
 
-서버/이미지/HTTP/AI 어댑터 테스트와 Node VM 기반 자동 저장 경쟁 테스트를 제공합니다. AI 테스트는 모의 응답을 사용하며 실제 공급자를 호출하지 않습니다. Node VM 테스트는 실제 브라우저 렌더링 검증을 대신하지 않습니다. 이번 검증 결과는 `docs/validation.md`에 기록합니다.
+서버/이미지/HTTP/AI 어댑터 테스트와 Node VM 기반 자동 저장 경쟁 테스트를 제공합니다. AI 테스트는 모의 응답을 사용하며 실제 공급자를 호출하지 않습니다. Node VM/Fetch API 테스트는 실제 브라우저·Cloudflare 런타임 검증을 대신하지 않습니다. 이번 검증 결과는 `docs/validation.md`에 기록합니다.
 
 ## 배포 계획
 
-현재 코드를 Vercel/Cloudflare Workers에 그대로 배포하면 안 됩니다. 로컬 파일·SQLite·worker 스레드가 영속 프로세스에 의존합니다.
+Python 서버 전체를 Vercel/Cloudflare Workers에 그대로 배포하면 안 됩니다. Cloudflare에는 `npm run build`로 만든 `dist`와 Pages Functions를 배포하고 Python ASGI는 영속 디스크가 있는 별도 서버로 실행합니다. 로컬 파일·SQLite·worker 스레드가 영속 프로세스에 의존합니다.
 
-내부 시험은 영속 볼륨을 가진 단일 Linux 프로세스에서 비루트 사용자, HTTPS 리버스 프록시, `COOKIE_SECURE=1`, 비공개 파일 저장소, 프로세스 자동 재시작으로 구성합니다. Python 표준 HTTP 서버는 개발용이므로 운영용 ASGI 서버와 요청 크기/동시성/로그인 시도 제한을 먼저 추가하십시오. 이 작업에서는 외부 배포하지 않았습니다.
+내부 시험은 영속 볼륨을 가진 단일 Linux 프로세스에서 비루트 사용자, HTTPS 리버스 프록시, `COOKIE_SECURE=1`, 비공개 파일 저장소, 프로세스 자동 재시작으로 구성합니다. `python server.py`는 개발용입니다. 배포용 `Dockerfile`은 Uvicorn 단일 프로세스, 요청 동시성 제한, 비루트 실행과 로그인 시도 제한을 사용합니다. 이 작업에서는 외부 계정 배포를 확인하지 않았습니다.
 
 운영 목표 구조는 Next.js 모바일 프런트 + Supabase Auth/PostgreSQL/private Storage + 전용 컨테이너 worker입니다. Vercel은 UI와 짧은 API만 담당하고, 대용량 ZIP은 재개 업로드·디스크 스트리밍·행 잠금/lease/heartbeat를 가진 PostgreSQL 큐에서 처리합니다. 공용 auth.uid()만으로 접근을 허용하지 않고 기기별 capability를 모든 요청에서 검사해야 합니다. 1,000장을 브라우저에서 일괄 해제하지 않습니다.

@@ -97,3 +97,9 @@ class Core(unittest.TestCase):
   with patch.object(vision,'recommend') as provider:
    server.analyse_job(job,server.digest('device'));provider.assert_not_called()
   self.assertEqual(photo['analysisStatus'],'interrupted');self.assertIn('자동 재요청하지',photo['analysisError'])
+
+ def test_orphan_upload_cleanup(self):
+  old=server.DATA/'orphan-old';fresh=server.DATA/'orphan-new'
+  for folder in [old,fresh]:folder.mkdir(exist_ok=True);(folder/'photo').write_bytes(b'private photo')
+  os.utime(old,(time.time()-86401,time.time()-86401))
+  server.cleanup();self.assertFalse(old.exists());self.assertTrue(fresh.exists())

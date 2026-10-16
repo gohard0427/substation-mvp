@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!requirements.lock
+!server.py
+!vision.py
+!asgi.py
+!static/
+!static/**
+!scripts/
+!scripts/entrypoint.sh
