@@ -75,3 +75,9 @@ test('native fetch is invoked without the SupabaseClient receiver',async()=>{
  const client=new SupabaseClient(b.env,function(){receiver=this;return Promise.resolve(Response.json({ok:true}));});
  await client.request('/rest/v1/rpc/np_rpc');assert.equal(receiver,globalThis);
 });
+
+test('Cloudflare-compatible redirect mode never follows privileged redirects',async()=>{
+ const {SupabaseClient}=await import('../cloudflare/supabase-client.mjs');let calls=0;
+ const client=new SupabaseClient(b.env,async function(url,options){calls++;assert.equal(options.redirect,'manual');return new Response(null,{status:302,headers:{Location:'https://untrusted.invalid'}});});
+ await assert.rejects(client.rpc('config_get'),/서버 요청/);assert.equal(calls,1);
+});

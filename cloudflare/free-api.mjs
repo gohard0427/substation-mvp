@@ -49,7 +49,7 @@ export async function freeGateway(request,env,fetcher=fetch){
    const email=env[role==='admin'?'ADMIN_EMAIL':'WORKER_EMAIL'],userId=env[role==='admin'?'ADMIN_USER_ID':'WORKER_USER_ID'];
    if(!email||!userId||!env.SUPABASE_ANON_KEY)throw new AppError('로그인 계정 설정이 아직 완료되지 않았습니다.',503);
    const identity=await hash((request.headers.get('CF-Connecting-IP')||'unknown')+':'+role);await client.rpc('login_check',{identity});
-   const auth=await fetcher.call(globalThis,new URL('/auth/v1/token?grant_type=password',client.url).toString(),{method:'POST',headers:{apikey:env.SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password:input.password}),redirect:'error'});
+   const auth=await fetcher.call(globalThis,new URL('/auth/v1/token?grant_type=password',client.url).toString(),{method:'POST',headers:{apikey:env.SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password:input.password}),redirect:'manual'});
    const credentials=await auth.json();if(!auth.ok||credentials.user?.id!==userId){await client.rpc('login_failed',{identity});throw new AppError('비밀번호를 확인하세요.',401);}
    const session=random(),device=/^[a-f0-9]{64}$/.test(jar.np_device||'')?jar.np_device:random();
    await client.rpc('session_create',{tokenHash:await hash(session),role,userId,identity});
