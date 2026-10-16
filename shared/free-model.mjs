@@ -35,6 +35,7 @@ export function safePhotoUpdate(photo,input){
  }
  for(const key of ['confirmed','excluded','measurementScene','hasExistingPlate'])output[key]=input[key]===true;
  output.rotation=Number(input.rotation??photo.rotation??0);if(!Number.isInteger(output.rotation)||output.rotation<0||output.rotation>3)throw new ValidationError('회전 값을 확인하세요.');
+ if(photo.recommendation&&(output.rotation!==photo.rotation||output.equipmentType!==photo.equipmentType)){output.analysisStatus='stale';output.confirmed=false;output.ambiguityChoice='';output.ambiguityGroupId='';}
  return output;
 }
 export function imageInfo(bytes){

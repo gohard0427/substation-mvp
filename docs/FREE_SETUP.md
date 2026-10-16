@@ -61,7 +61,7 @@ Supabase Vault 화면에서 `np_project_url`(프로젝트 URL)과 `np_service_ro
 
 별도 유료 서버를 만들지 않습니다. 앱 저장 예약을 700MiB로 제한하지만 무료 전송량·DB·함수 호출 한도도 적용됩니다. Supabase Free의 현재 저장/전송/비활성 중지 조건과 Cloudflare Pages Functions의 Workers Free CPU 제한을 계정 화면에서 확인하세요. 무료 한도 정책은 공급자가 변경할 수 있습니다. 사진 반복 다운로드나 동시 사용량에 따라 하루 20~50장이어도 한도가 부족할 수 있습니다.
 
-무료 API의 AI 버튼은 비활성입니다. 외부 비전 API 도입은 별도 사용료·공급자 보관 정책·예산 한도를 정한 뒤 연결합니다. 월간 수백~1,000장 서버 백그라운드 분석은 이번 무료 MVP 범위에 포함하지 않습니다.
+외부 API 키와 활성화 설정이 없으면 AI 버튼은 비활성입니다. [AI_SETUP.md](AI_SETUP.md)의 검수·AI 연결 안내를 참고하세요. 외부 비전 API 도입은 별도 사용료·공급자 보관 정책·예산 한도를 정한 뒤 연결합니다. 월간 수백~1,000장 서버 백그라운드 분석은 이번 무료 MVP 범위에 포함하지 않습니다.
 
 - https://supabase.com/pricing
 - https://supabase.com/docs/guides/functions/schedule-functions

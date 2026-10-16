@@ -40,10 +40,11 @@ async function boot() {
   $('#project').value = settings.project;
   $('#workTypes').value = settings.workTypes.join('\n');
   $('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join('');
-  $('#aiInfo').textContent = browserEngine ? '무료 MVP · AI 분석은 아직 연결되지 않았습니다. 작업 내용을 직접 입력하세요.' : settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
+  $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
   $('#login').hidden = true;
   $('#workspace').hidden = false;
   $('#admin').hidden = settings.role !== 'admin';
+  if(browserEngine && settings.role === 'admin') { const referenceRoot = document.querySelector('#referenceAdmin'); if(referenceRoot) { try { const module=await import('./reference-admin.mjs'); await module.mount(referenceRoot,api,notice,()=>notice('작업 목록은 화면을 새로고침하면 반영됩니다.')); } catch(e) { notice(e.message); } } }
   renderGroups();
   await list();
 }
@@ -223,7 +224,7 @@ $('#applyBatch').onclick = run(async () => exclusive(async () => {
   }
   markDirty(); await flush(); open(job);
 }));
-$('#analyse').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/analyse`, {}); update(); if (['analysis_queued','analysing'].includes(job.state)) schedulePoll(); }));
+$('#analyse').onclick = run(async () => exclusive(async () => { if(browserEngine) { job=await browserEngine.analyse(job,api,current=>{job=current;update();}); } else job = await api(`/api/jobs/${job.id}/analyse`, {}); update(); if (['analysis_queued','analysing'].includes(job.state)) schedulePoll(); }));
 $('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (browserEngine) await browserGenerate(); else if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
 $('#finish').onclick = run(async () => {
   if (!confirm('ZIP을 휴대폰 또는 PC에 저장했나요? 서버 사진과 결과물을 영구 삭제합니다.')) return;

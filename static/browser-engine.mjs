@@ -131,3 +131,28 @@ export async function downloadZip(job,entries,progress){
  }catch(error){try{await writer.close();}catch{}throw error;}
 }
 export function saveBlob(blob,name){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+
+export async function prepareAnalysis(blob,photo,mask={x:.44,y:.75}){
+ // Mask before rotation so a manual turn cannot move an old answer outside the mask.
+ const image=await bitmap(blob),out=canvas(image.width,image.height),ctx=out.getContext('2d');let masked;
+ try{ctx.drawImage(image,0,0);ctx.fillStyle='#808080';const x=Math.max(0,Math.floor(image.width*mask.x)-5),y=Math.max(0,Math.floor(image.height*mask.y)-5);ctx.fillRect(x,y,image.width-x,image.height-y);masked=await jpeg(out,.85);}finally{image.close();out.width=out.height=0;}
+ const analysis=await renderPhoto(masked,photo,'',{plate:false,maxWidth:960});const im=await bitmap(analysis),small=canvas(64,64),s=small.getContext('2d',{willReadFrequently:true});
+ try{
+  s.drawImage(im,0,0,64,64);const pixels=s.getImageData(0,0,64,64).data,values=Array(64).fill(0);
+  for(let i=0;i<pixels.length;i+=4){for(let channel=0;channel<3;channel++)values[channel*16+(pixels[i+channel]>>4)]+=1/4096;const pos=i/4,row=Math.floor(pos/64),col=pos%64;values[48+Math.floor(row/16)*4+Math.floor(col/16)]+=(pixels[i]+pixels[i+1]+pixels[i+2])/(3*255*256);}
+  return {blob:analysis,values:values.map(v=>Math.max(0,Math.min(1,v)))};
+ }finally{im.close();small.width=small.height=0;}
+}
+export async function analyse(job,api,progress){
+ previewsPaused=true;await activePreview;
+ try{
+  for(const p of job.photos.filter(p=>!p.excluded&&!p.confirmed)){
+   const photo=job.photos.find(v=>v.id===p.id);const source=await (await checked(await fetch(`/api/jobs/${job.id}/image/${photo.id}`))).blob();const analysis=await prepareAnalysis(source,photo);
+   const response=await checked(await fetch(`/api/jobs/${job.id}/analyse/${photo.id}`,{method:'POST',headers:{'X-Visual-Signature':JSON.stringify(analysis.values)},body:analysis.blob}));job=await response.json();progress(job);
+  }return job;
+ }finally{previewsPaused=false;drainPreviews();}
+}
+export async function referencePlatePreview(blob,mask){
+ const im=await bitmap(blob),x=Math.floor(im.width*mask.x),y=Math.floor(im.height*mask.y),width=im.width-x,height=im.height-y,scale=Math.min(640/width,1),out=canvas(Math.round(width*scale),Math.round(height*scale));
+ try{out.getContext('2d').drawImage(im,x,y,width,height,0,0,out.width,out.height);return await jpeg(out,.9);}finally{im.close();out.width=out.height=0;}
+}

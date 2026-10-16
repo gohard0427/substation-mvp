@@ -10,6 +10,7 @@ for(const file of ['index.html','style.css','app.js']){
  await writeFile(root+'dist/'+file,source);
 }
 await build({entryPoints:[root+'static/browser-engine.mjs'],bundle:true,format:'esm',platform:'browser',target:'es2022',outfile:root+'dist/browser-engine.mjs',logLevel:'warning'});
+await build({entryPoints:[root+'static/reference-admin.mjs'],bundle:true,format:'esm',platform:'browser',target:'es2022',outfile:root+'dist/reference-admin.mjs',logLevel:'warning'});
 await build({entryPoints:[root+'static/fonts.css'],bundle:true,outfile:root+'dist/fonts.css',loader:{'.woff2':'file','.woff':'file'},assetNames:'fonts/[name]-[hash]',logLevel:'warning'});
 await copyFile(root+'deploy/pages-headers',root+'dist/_headers');
 await writeFile(root+'dist/_routes.json',JSON.stringify({version:1,include:['/api/*'],exclude:[]},null,2)+'\n');

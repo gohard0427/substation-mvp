@@ -1,3 +1,4 @@
+import {referenceRoute,analysePhoto,aiConfigured,dailyLimit} from './reference-api.mjs';
 import {SupabaseClient,AppError} from './supabase-client.mjs';
 import {BUCKET,storageDelete} from '../supabase/functions/_shared/cleanup.mjs';
 import {ValidationError,LIMITS,PROFILE,hash,fingerprint,safePath,infer,safePhotoUpdate,validateImage,validateConfirmed,normalized} from '../shared/free-model.mjs';
@@ -46,29 +47,30 @@ export async function freeGateway(request,env,fetcher=fetch){
   if(path==='/api/login'&&request.method==='POST'){
    const input=await readJson(request),role=input.role;
    if(!['worker','admin'].includes(role)||typeof input.password!=='string'||input.password.length>128)throw new AppError('비밀번호를 확인하세요.',401);
-   const email=env[role==='admin'?'ADMIN_EMAIL':'WORKER_EMAIL'],userId=env[role==='admin'?'ADMIN_USER_ID':'WORKER_USER_ID'];
+   const email=env[role==='admin'?'ADMIN_EMAIL':'WORKER_EMAIL']?.trim(),userId=env[role==='admin'?'ADMIN_USER_ID':'WORKER_USER_ID']?.trim();
    if(!email||!userId||!env.SUPABASE_ANON_KEY)throw new AppError('로그인 계정 설정이 아직 완료되지 않았습니다.',503);
    const identity=await hash((request.headers.get('CF-Connecting-IP')||'unknown')+':'+role);await client.rpc('login_check',{identity});
    const auth=await fetcher.call(globalThis,new URL('/auth/v1/token?grant_type=password',client.url).toString(),{method:'POST',headers:{apikey:env.SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password:input.password}),redirect:'manual'});
-   const credentials=await auth.json();if(!auth.ok||credentials.user?.id!==userId){await client.rpc('login_failed',{identity});throw new AppError('비밀번호를 확인하세요.',401);}
+   const credentials=await auth.json();if(auth.ok&&credentials.user?.id!==userId)throw new AppError('로그인 인증은 성공했지만 사용자 ID 설정이 일치하지 않습니다. 관리자에게 Cloudflare 계정 설정 확인을 요청하세요.',503);if(!auth.ok){await client.rpc('login_failed',{identity});throw new AppError('비밀번호를 확인하세요.',401);}
    const session=random(),device=/^[a-f0-9]{64}$/.test(jar.np_device||'')?jar.np_device:random();
    await client.rpc('session_create',{tokenHash:await hash(session),role,userId,identity});
    const response=json({role});response.headers.append('Set-Cookie',cookie('np_session',session,43200));response.headers.append('Set-Cookie',cookie('np_device',device,31536000));return response;
   }
   if(!/^[a-f0-9]{64}$/.test(jar.np_session||'')||!/^[a-f0-9]{64}$/.test(jar.np_device||''))throw new AppError('로그인이 필요합니다.',401);
   const session=await client.rpc('session_get',{tokenHash:await hash(jar.np_session)});
-  if(session.userId!==env[session.role==='admin'?'ADMIN_USER_ID':'WORKER_USER_ID'])throw new AppError('로그인이 필요합니다.',401);
+  if(session.userId!==env[session.role==='admin'?'ADMIN_USER_ID':'WORKER_USER_ID']?.trim())throw new AppError('로그인이 필요합니다.',401);
   const admin=()=>{if(session.role!=='admin')throw new AppError('관리자 권한이 필요합니다.',403);};
   const cfg=await client.rpc('config_get');
   if(['/api/work-types','/api/ambiguity-groups','/api/revoke','/api/worker-password'].includes(path)&&request.method!=='POST')throw new AppError('POST 요청만 허용됩니다.',405);
   if(path==='/api/settings'){
-   if(request.method==='GET')return json({project:cfg.project,workTypes:cfg.workTypes,ambiguityGroups:cfg.ambiguityGroups,role:session.role,processingMode:'browser',aiConfigured:false,storageBytes:cfg.storageBytes,storageLimit:cfg.storageLimit,limits:LIMITS});
+   if(request.method==='GET')return json({project:cfg.project,workTypes:cfg.workTypes,ambiguityGroups:cfg.ambiguityGroups,role:session.role,processingMode:'browser',aiConfigured:aiConfigured(env),aiModel:env.OPENAI_VISION_MODEL||'gpt-4.1-mini',aiDailyLimit:dailyLimit(env),storageBytes:cfg.storageBytes,storageLimit:cfg.storageLimit,limits:LIMITS});
    admin();const value=await readJson(request);if(typeof value.project!=='string'||!value.project.trim()||value.project.length>150||/[\x00-\x1f]/.test(value.project))throw new AppError('공사명을 확인하세요.');await client.rpc('config_set',{project:value.project});return json({ok:true});
   }
   if(path==='/api/work-types'){admin();const {workTypes}=await readJson(request);if(!Array.isArray(workTypes)||!workTypes.length||workTypes.length>500||workTypes.some(v=>typeof v!=='string'||!v.trim()||v.length>100||/[\x00-\x1f]/.test(v))||new Set(workTypes.map(normalized)).size!==workTypes.length)throw new AppError('중복 없이 작업명을 1~500개 입력하세요.');await client.rpc('config_set',{workTypes});return json({workTypes});}
   if(path==='/api/ambiguity-groups'){admin();const groups=validateGroups((await readJson(request)).groups);await client.rpc('config_set',{ambiguityGroups:groups});return json({groups});}
   if(path==='/api/revoke'){admin();await client.rpc('sessions_revoke',{all:true});return json({ok:true});}
   if(path==='/api/worker-password'){admin();const {password}=await readJson(request);if(typeof password!=='string'||password.length<12||password.length>128)throw new AppError('비밀번호는 12~128자로 입력하세요.');await client.request(`/auth/v1/admin/users/${env.WORKER_USER_ID}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});await client.rpc('sessions_revoke',{all:false});return json({ok:true});}
+  if(path.startsWith('/api/references')||path==='/api/ai-usage')return await referenceRoute({path,request,client,admin,readJson,body,json});
   if(path==='/api/jobs'){
    if(request.method==='GET')return json(await client.rpc('jobs_list',{deviceHash:await hash(jar.np_device)}));
    const id=crypto.randomUUID(),args=await access(jar.np_device,id);return json(clientJob(await client.rpc('job_create',args)));
@@ -100,6 +102,7 @@ export async function freeGateway(request,env,fetcher=fetch){
   }
   if(action==='pause'&&request.method==='POST')return json(clientJob(await client.rpc('generation_pause',args)));
   if(action==='complete'&&request.method==='POST')return json(clientJob(await client.rpc('generation_complete',args)));
+  if(action==='analyse'&&photoId&&request.method==='POST')return json(clientJob(await analysePhoto({request,env,client,job,photoId,args,body,fetcher})));
   if(action==='analyse')throw new AppError('무료 MVP의 AI 연결은 아직 설정되지 않았습니다. 작업 내용을 직접 입력하세요.',503);
   throw new AppError('요청 경로를 확인하세요.',404);
  }catch(error){return json({error:error instanceof AppError||error instanceof ValidationError?error.message:'요청을 처리하지 못했습니다. 입력값과 서버 연결 상태를 확인하세요.'},error instanceof AppError?error.status:400);}

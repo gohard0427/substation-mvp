@@ -11,7 +11,8 @@
     "build": "node scripts/build.mjs",
     "test:edge": "node tests/test_proxy.mjs",
     "test:free": "node tests/test_free_api.mjs",
-    "test:browser": "npm run build && node tests/test_free_browser.mjs"
+    "test:browser": "npm run build && node tests/test_free_browser.mjs",
+    "test:ai": "node tests/test_ai.mjs"
   },
   "engines": {
     "node": ">=22"
