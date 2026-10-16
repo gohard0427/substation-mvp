@@ -2,16 +2,27 @@
   "name": "substation-mvp",
   "version": "0.1.0",
   "private": true,
-  "description": "전력설비 작업 사진 명판 생성 — Python 서버와 한국어 웹 화면",
+  "description": "무료 Cloudflare Pages + Supabase 작업 사진 명판 MVP",
   "scripts": {
     "start": "python server.py",
     "test": "python -m unittest discover -s tests -v && node tests/test_frontend.cjs && node tests/test_proxy.mjs",
     "test:frontend": "node tests/test_frontend.cjs",
     "check": "node --check static/app.js",
     "build": "node scripts/build.mjs",
-    "test:edge": "node tests/test_proxy.mjs"
+    "test:edge": "node tests/test_proxy.mjs",
+    "test:free": "node tests/test_free_api.mjs",
+    "test:browser": "npm run build && node tests/test_free_browser.mjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans-kr": "5.3.1",
+    "@zip.js/zip.js": "2.23.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "esbuild": "0.28.2",
+    "playwright-core": "1.64.1"
   }
 }

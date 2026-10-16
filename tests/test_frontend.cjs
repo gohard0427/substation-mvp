@@ -5,7 +5,7 @@ const fs = require('node:fs');
 function harness() {
   const elements = new Map();
   const context = vm.createContext({
-    document: {querySelector: id => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); }, querySelectorAll: () => []},
+    document: {querySelector: id => { if (!elements.has(id)) elements.set(id, {replaceChildren() {}}); return elements.get(id); }, querySelectorAll: () => []},
     window: {addEventListener() {}}, setTimeout() { return 1; }, clearTimeout() {},
     fetch: async () => { throw Error('not logged in'); }, console,
   });

@@ -1,0 +1,18 @@
+import {createServer} from 'node:http';
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import {chromium} from 'playwright-core';
+const server=createServer(async(req,res)=>{try{const path=new URL(req.url,'http://localhost').pathname;const file=path==='/'?'index.html':path.slice(1);if(file.includes('..'))throw Error();const bytes=await readFile('dist/'+file);res.setHeader('Content-Type',file.endsWith('.mjs')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.woff2')?'font/woff2':'text/html');res.end(bytes);}catch{res.statusCode=404;res.end();}});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox','--disable-dev-shm-usage']});
+try{
+ const page=await browser.newPage({viewport:{width:390,height:844}});await page.goto(`http://127.0.0.1:${server.address().port}/`);
+ const result=await page.evaluate(async()=>{
+  const engine=await import('/browser-engine.mjs');const c=document.createElement('canvas');c.width=1200;c.height=1600;const ctx=c.getContext('2d');ctx.fillStyle='#78909c';ctx.fillRect(0,0,c.width,c.height);const raw=await new Promise(r=>c.toBlob(r,'image/jpeg',.92));
+  const prepared=await engine.prepareSource(raw);const photo={id:'a'.repeat(24),path:'2026-10-16/남시화/측정.jpg',location:'남시화 변전소',equipment:'154kV GIS PMA',work:'코일 저항 측정',date:'2026-10-16',rotation:0,excluded:false};
+  const output=await engine.renderPhoto(prepared.blob,photo,'2026년 변전소 전력설비 정기점검 공사');const image=await createImageBitmap(output);const inspect=document.createElement('canvas');inspect.width=image.width;inspect.height=image.height;const p=inspect.getContext('2d');p.drawImage(image,0,0);const edge=[...p.getImageData(image.width-1,image.height-1,1,1).data];
+  const job={id:'test',photos:[{...photo,resultBytes:output.size}]};const entries=engine.downloadPlans(job)[0];const original=window.fetch;window.fetch=async()=>new Response(output);let zip;try{zip=await engine.downloadZip(job,entries,()=>{});}finally{window.fetch=original;}
+  return {width:image.width,height:image.height,edge,font:document.fonts.check('700 31px "Noto Sans KR"'),size:output.size,zipSize:zip.size,bytes:[...new Uint8Array(await output.arrayBuffer())]};
+ });
+ assert.equal(result.width,1280);assert.equal(result.height,960);assert.equal(result.font,true);assert.ok(result.edge.slice(0,3).every(v=>v<80));assert.ok(result.zipSize>result.size);await mkdir('/workspace/substation-qa',{recursive:true});await writeFile('/workspace/substation-qa/free-output.jpg',new Uint8Array(result.bytes));await page.screenshot({path:'/workspace/substation-qa/free-mobile.png',fullPage:true});console.log('PASS: real Chromium portrait conversion, 1280×960 JPEG, bundled Korean font, zero-margin bottom/right border, sequential ZIP download.');
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

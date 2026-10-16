@@ -1,8 +1,8 @@
 const $ = s => document.querySelector(s);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
 const normalized = value => String(value || '').replace(/\s+/g, '').toLowerCase();
-const stateNames = {uploaded:'확인 중', analysis_queued:'AI 분석 대기', analysing:'AI 분석 중', queued:'생성 대기 중', generating:'명판 생성 중', ready:'다운로드 가능', failed:'생성 실패'};
-let job, settings, poll, autosave, busy = false, blocked = false;
+const stateNames = {uploaded:'확인 중', analysis_queued:'AI 분석 대기', analysing:'AI 분석 중', queued:'생성 대기 중', generating:'명판 생성 중', ready:'다운로드 가능', failed:'생성 실패', deleting:'사진 삭제 중'};
+let job, settings, poll, autosave, browserEngine, stopRequested = false, busy = false, blocked = false;
 let editEpoch = 0, savedEpoch = 0, queue = Promise.resolve();
 function notice(message) { $('#notice').textContent = message; }
 async function api(path, data) {
@@ -33,10 +33,14 @@ function statusFor(photo) {
 }
 async function boot() {
   settings = await api('/api/settings');
+  if (settings.processingMode === 'browser' && !browserEngine) browserEngine = await import('./browser-engine.mjs');
+  $('#freeModeInfo').hidden = !browserEngine;
+  $('#modeLabel').textContent = browserEngine ? '무료 · 하루 작업 MVP' : '수동 작업 MVP';
+  $('#uploadLimit').textContent = browserEngine ? 'JPG · PNG · ZIP / 작업당 최대 50장 · ZIP 90MiB' : 'JPG · PNG · ZIP / 최대 200MB';
   $('#project').value = settings.project;
   $('#workTypes').value = settings.workTypes.join('\n');
   $('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join('');
-  $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
+  $('#aiInfo').textContent = browserEngine ? '무료 MVP · AI 분석은 아직 연결되지 않았습니다. 작업 내용을 직접 입력하세요.' : settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
   $('#login').hidden = true;
   $('#workspace').hidden = false;
   $('#admin').hidden = settings.role !== 'admin';
@@ -64,6 +68,7 @@ $('#revoke').onclick = run(async () => { if (confirm('모든 기기의 로그인
 $('#upload').onchange = async event => {
   try {
     await flush();
+    if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles([...event.target.files],api,notice)); await list(); notice('업로드 완료. 서버에 작업용 사본과 진행 상태를 저장했습니다.'); } finally { busy = false; update(); } return; }
     for (const file of event.target.files) {
       notice(`${file.name} 업로드 및 폴더 분석 중…`);
       const r = await fetch('/api/upload', {method:'POST', headers:{'X-Filename':encodeURIComponent(file.name)}, body:file});
@@ -74,14 +79,14 @@ $('#upload').onchange = async event => {
   finally { event.target.value = ''; }
 };
 function open(value) {
-  clearTimeout(autosave); clearTimeout(poll);
+  clearTimeout(autosave); clearTimeout(poll); browserEngine?.clearPreviews();
   job = value; editEpoch = savedEpoch = 0; blocked = false;
   $('#editor').hidden = false;
   $('#jobTitle').textContent = `${job.photos.length}장의 작업 사진`;
   $('#warnings').textContent = job.warnings.join(' / ');
   $('#group').innerHTML = [...new Set(job.photos.map(p => p.group))].map(group => `<option>${esc(group)}</option>`).join('');
   $('#photos').innerHTML = job.photos.map(p => `<article class="panel photo" data-id="${p.id}">
-    <div><img data-preview loading="lazy" src="/api/jobs/${job.id}/image/${p.id}?rotation=${p.rotation}" alt="${esc(p.path)}">
+    <div><img data-preview loading="lazy" src="${browserEngine ? 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' : `/api/jobs/${job.id}/image/${p.id}?rotation=${p.rotation}`}" alt="${esc(p.path)}">
     <h3>${esc(p.path)}</h3><span data-status class="tag"></span>
     <a data-result class="button secondary" hidden>완성 사진 다운로드 ↓</a>
     <p data-preview-label class="muted">방향 보정 미리보기</p>
@@ -97,7 +102,7 @@ function open(value) {
   $('#photos').oninput = onPhotoInput;
   $('#photos').onclick = event => { const button = event.target.closest('[data-candidate]'); if (!button) return; const input = button.closest('[data-id]').querySelector('[data-key="work"]'); input.value = button.dataset.candidate; onPhotoInput({target:input}); };
   update();
-  if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll();
+  if (!browserEngine && ['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll();
 }
 function onPhotoInput(event) {
   const card = event.target.closest('[data-id]'); if (!card) return;
@@ -132,20 +137,24 @@ function update() {
   $('#reviewSummary').textContent = Object.entries(counts).map(([name,count]) => `${name} ${count}장`).join(' · ');
   const locked = busy || ['analysis_queued','analysing','queued','generating'].includes(job.state);
   $('#analyse').disabled = locked || blocked || !settings.aiConfigured || !selected.length;
-  $('#generate').disabled = locked || blocked || !selected.length || selected.some(p => !p.confirmed || !resolved(p) || ['date','location','equipment','work'].some(k => !p[k]?.trim()));
+  $('#generate').disabled = job.state === 'deleting' || locked || blocked || !selected.length || selected.some(p => !p.confirmed || !resolved(p) || ['date','location','equipment','work'].some(k => !p[k]?.trim()));
   $('#save').disabled = locked || blocked;
   $('#applyBatch').disabled = locked || blocked;
   $('#download').hidden = job.state !== 'ready' || editEpoch !== savedEpoch;
-  $('#finish').hidden = job.state !== 'ready'; $('#finish').disabled = locked;
+  $('#finish').hidden = !['ready','deleting'].includes(job.state); $('#finish').disabled = locked;
+  $('#resume').hidden = !browserEngine || job.state !== 'generating'; $('#resume').disabled = busy;
+  $('#pause').hidden = !browserEngine || job.state !== 'generating';
+  $('#discard').hidden = !job || ['generating','queued','analysing','analysis_queued'].includes(job.state); $('#discard').disabled = busy;
+  if (browserEngine) $('#download').hidden = true;
   $('#download').href = `/api/jobs/${job.id}/download`;
   $('#download').download = '작업사진_명판.zip';
-  const dates = job.state === 'ready' ? [...new Set(selected.map(p => p.date))].sort() : [];
+  const dates = !browserEngine && job.state === 'ready' ? [...new Set(selected.map(p => p.date))].sort() : [];
   $('#dateDownloads').innerHTML = dates.map(date => `<a class="button secondary" href="/api/jobs/${job.id}/download?date=${encodeURIComponent(date)}" download="${esc(date)}_작업사진.zip">${esc(date)} ZIP ↓</a>`).join('');
   for (const card of document.querySelectorAll('[data-id]')) {
     const photo = job.photos.find(p => p.id === card.dataset.id);
     const ready = job.state === 'ready' && !photo.excluded;
     const src = ready ? `/api/jobs/${job.id}/result/${photo.id}?v=${job.revision}` : `/api/jobs/${job.id}/image/${photo.id}?rotation=${photo.rotation}`;
-    const img = card.querySelector('[data-preview]'); if (img.getAttribute('src') !== src) img.src = src;
+    const img = card.querySelector('[data-preview]'); if (browserEngine) browserEngine.setPreview(img,job,photo,ready); else if (img.getAttribute('src') !== src) img.src = src;
     const link = card.querySelector('[data-result]'); link.hidden = !ready;
     link.href = `/api/jobs/${job.id}/result/${photo.id}?download=1`;
     card.querySelector('[data-preview-label]').textContent = ready ? '명판 합성 결과' : '방향 보정 미리보기';
@@ -163,9 +172,10 @@ function update() {
       }
       choice.value = photo.ambiguityGroupId === group.id ? photo.ambiguityChoice || '' : '';
     }
-    for (const input of card.querySelectorAll('input,select')) input.disabled = locked || blocked;
+    for (const input of card.querySelectorAll('input,select')) input.disabled = locked || blocked || job.state === 'deleting';
   }
-  $('#progress').textContent = blocked ? '저장 충돌: 작업을 다시 불러오세요.' : job.state === 'analysis_queued' ? 'AI 분석 대기 중 · 서버에서 계속 처리합니다.' : job.state === 'analysing' ? `AI 분석 중 ${job.analysisProgress || 0}장 완료` : job.state === 'queued' ? '생성 대기 중 · 브라우저를 닫아도 이어집니다.' : job.state === 'generating' ? `명판 생성 중 ${job.progress || 0}장 완료` : job.state === 'ready' ? '생성 완료. 다운로드 후 저장 완료를 눌러 주세요.' : job.error || (editEpoch !== savedEpoch ? '저장 중 · 이 화면을 유지해 주세요.' : '진행 상태가 서버에 저장되어 있습니다.');
+  renderFreeDownloads();
+  $('#progress').textContent = job.state === 'deleting' ? '서버 사진을 정리 중입니다. 저장 완료를 누르면 삭제를 다시 시도합니다.' : browserEngine && job.state === 'generating' ? `이 기기에서 명판 생성 중 ${job.progress || 0}장 완료 · 화면을 닫으면 중지되며 다시 불러와 이어갈 수 있습니다.` : blocked ? '저장 충돌: 작업을 다시 불러오세요.' : job.state === 'analysis_queued' ? 'AI 분석 대기 중 · 서버에서 계속 처리합니다.' : job.state === 'analysing' ? `AI 분석 중 ${job.analysisProgress || 0}장 완료` : job.state === 'queued' ? '생성 대기 중 · 브라우저를 닫아도 이어집니다.' : job.state === 'generating' ? `명판 생성 중 ${job.progress || 0}장 완료` : job.state === 'ready' ? '생성 완료. 다운로드 후 저장 완료를 눌러 주세요.' : job.error || (editEpoch !== savedEpoch ? '저장 중 · 이 화면을 유지해 주세요.' : '진행 상태가 서버에 저장되어 있습니다.');
 }
 function persist() {
   clearTimeout(autosave);
@@ -196,7 +206,7 @@ async function flush() {
 function schedulePoll() { clearTimeout(poll); poll = setTimeout(refresh, 1200); }
 async function refresh() {
   const id = job?.id;
-  try { const value = await api('/api/jobs/' + id); if (job?.id !== id) return; if (['analysis_queued','analysing'].includes(job.state) && !['analysis_queued','analysing'].includes(value.state)) { open(value); return; } job = value; update(); if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }
+  try { const value = await api('/api/jobs/' + id); if (job?.id !== id) return; if (['analysis_queued','analysing'].includes(job.state) && !['analysis_queued','analysing'].includes(value.state)) { open(value); return; } job = value; update(); if (!browserEngine && ['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }
   catch (error) { notice(error.message + ' · 진행 중인 작업을 다시 불러올 수 있습니다.'); }
 }
 async function exclusive(fn) {
@@ -214,10 +224,10 @@ $('#applyBatch').onclick = run(async () => exclusive(async () => {
   markDirty(); await flush(); open(job);
 }));
 $('#analyse').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/analyse`, {}); update(); if (['analysis_queued','analysing'].includes(job.state)) schedulePoll(); }));
-$('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
+$('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (browserEngine) await browserGenerate(); else if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
 $('#finish').onclick = run(async () => {
   if (!confirm('ZIP을 휴대폰 또는 PC에 저장했나요? 서버 사진과 결과물을 영구 삭제합니다.')) return;
-  await exclusive(async () => { await api(`/api/jobs/${job.id}/finish`, {}); job = null; $('#editor').hidden = true; await list(); notice('임시 사진과 결과물을 삭제했습니다.'); });
+  await exclusive(async () => { await api(`/api/jobs/${job.id}/finish`, {}); browserEngine?.clearPreviews(); job = null; $('#editor').hidden = true; await list(); notice('임시 사진과 결과물을 삭제했습니다.'); });
 });
 window.addEventListener('beforeunload', event => { if (editEpoch !== savedEpoch && job) { event.preventDefault(); event.returnValue = ''; } });
 function renderGroups() {
@@ -233,8 +243,45 @@ $('#saveGroups').onclick = run(async () => {
   });
   const saved = await api('/api/ambiguity-groups', {groups}); settings.ambiguityGroups = saved.groups; renderGroups(); update(); notice('구분 필요 그룹을 저장했습니다. 현재 사진에도 새 규칙이 적용됩니다.');
 });
-boot().catch(error => { if (error.status !== 401) notice(error.message); });
+
 
 $('#changeWorkerPassword').onclick = run(async () => { await api('/api/worker-password', {password:$('#newWorkerPassword').value}); $('#newWorkerPassword').value = ''; notice('공용 비밀번호를 변경하고 기존 작업자 세션을 종료했습니다.'); });
 
 $('#saveWorkTypes').onclick = run(async () => { const workTypes = $('#workTypes').value.split('\n').map(s => s.trim()).filter(Boolean); await api('/api/work-types', {workTypes}); settings.workTypes = workTypes; $('#works').innerHTML = workTypes.map(name => `<option>${esc(name)}</option>`).join(''); notice('표준 작업 목록을 저장했습니다. 다음 AI 분석부터 적용됩니다.'); });
+
+async function browserGenerate() {
+  stopRequested = false;
+  job = await browserEngine.generate(job,api,current => { job = current; update(); },() => stopRequested);
+  update();
+}
+$('#resume').onclick = run(async () => exclusive(browserGenerate));
+$('#pause').onclick = run(async () => {
+  if (busy) { stopRequested = true; notice('현재 사진 처리가 끝나면 중지합니다.'); }
+  else await exclusive(async () => { job = await api(`/api/jobs/${job.id}/pause`,{}); update(); });
+});
+$('#discard').onclick = run(async () => {
+  if (!confirm('이 작업과 서버의 모든 임시 사진을 삭제할까요? 삭제 후 복구할 수 없습니다.')) return;
+  await exclusive(async () => { await api(`/api/jobs/${job.id}/finish`,{}); browserEngine?.clearPreviews(); job = null; editEpoch = savedEpoch = 0; $('#editor').hidden = true; await list(); notice('작업을 종료하고 서버 파일을 삭제했습니다.'); });
+});
+let freeDownloadKey = '';
+function renderFreeDownloads() {
+  const container = $('#freeDownloads');
+  if (!browserEngine || job.state !== 'ready') { container.replaceChildren(); freeDownloadKey = ''; return; }
+  const key = job.id + ':' + job.revision + ':' + busy;
+  if (freeDownloadKey === key) return;
+  freeDownloadKey = key; container.replaceChildren();
+  for (const date of ['', ...new Set(job.photos.filter(p => !p.excluded).map(p => p.date))]) {
+    const plans = browserEngine.downloadPlans(job,date);
+    plans.forEach((entries,index) => {
+      const button = document.createElement('button'); button.className = 'secondary'; button.disabled = busy;
+      button.textContent = `${date || '전체'} ZIP ${plans.length > 1 ? `${index+1}/${plans.length}` : ''} 다운로드 ↓`;
+      button.onclick = run(async () => exclusive(async () => {
+        const blob = await browserEngine.downloadZip(job,entries,notice);
+        browserEngine.saveBlob(blob,`${date || '전체'}_작업사진${plans.length>1?'_'+(index+1):''}.zip`);
+        notice('다운로드를 요청했습니다. 모든 ZIP의 실제 저장을 확인한 후 저장 완료를 눌러 주세요.');
+      })); container.append(button);
+    });
+  }
+}
+
+boot().catch(error => { if (error.status !== 401) notice(error.message); });

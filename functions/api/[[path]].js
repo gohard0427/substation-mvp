@@ -1,2 +1,3 @@
 import {proxy} from '../../cloudflare/proxy.mjs';
-export function onRequest(context) { return proxy(context.request,context.env); }
+import {freeGateway} from '../../cloudflare/free-api.mjs';
+export function onRequest(context) { return context.env.DEPLOY_TARGET==='python' ? proxy(context.request,context.env) : freeGateway(context.request,context.env); }

@@ -1,0 +1,2 @@
+[functions.np-cleanup]
+verify_jwt = false

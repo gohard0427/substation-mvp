@@ -1,3 +1,5 @@
+> 이전 Python 서버 구성 자료입니다. 현재 기본 무료 배포는 [FREE_SETUP.md](FREE_SETUP.md)를 따르세요.
+
 # GitHub → Cloudflare Pages 배포
 
 현재 소스는 Cloudflare Pages의 화면·API 중계와 영속 디스크를 쓰는 Python ASGI 백엔드로 구성합니다. **외부 계정에 실제 서비스를 생성하거나 배포 완료한 상태는 아닙니다.** 기존 작업자 명단 앱의 저장소·배포는 변경하지 않습니다.
