@@ -4,11 +4,11 @@ export class SupabaseClient{
  constructor(env,fetcher=fetch){
   try{this.url=new URL(env.SUPABASE_URL);if(this.url.protocol!=='https:'||this.url.pathname!=='/'||this.url.username||this.url.password)throw Error();}catch{throw new AppError('무료 서버 연결 설정이 아직 완료되지 않았습니다.',503);}
   if(!env.SUPABASE_SERVICE_ROLE_KEY)throw new AppError('무료 서버 연결 설정이 아직 완료되지 않았습니다.',503);
-  this.key=env.SUPABASE_SERVICE_ROLE_KEY;this.fetcher=(input,options)=>fetcher(input,options);
+  this.key=env.SUPABASE_SERVICE_ROLE_KEY;this.fetcher=(input,options)=>fetcher.call(globalThis,input,options);
  }
  async request(path,options={}){
   const headers=new Headers(options.headers);headers.set('apikey',this.key);headers.set('Authorization','Bearer '+this.key);
-  let response;try{response=await this.fetcher(new URL(path,this.url).toString(),{...options,headers,redirect:'error'});}catch{throw new AppError('서버 연결에 실패했습니다. 입력은 유지됩니다. 잠시 후 다시 시도하세요.',503);}
+  let response;try{response=await this.fetcher(new URL(path,this.url).toString(),{...options,headers,redirect:'error'});}catch(error){const code=/illegal invocation|incorrect.*this/i.test(error.message||'')?'FETCH_RECEIVER':/resolve|dns/i.test(error.message||'')?'DNS':/header/i.test(error.message||'')?'HEADER':'NETWORK';throw new AppError('서버 연결에 실패했습니다. 오류 코드: '+code,503);}
   if(!response.ok){let detail={};try{detail=await response.json();}catch{}const entry=messages[detail.message];throw new AppError(entry?.[0]||'서버 요청을 처리하지 못했습니다. 연결 설정 또는 저장 한도를 확인하세요.',entry?.[1]||503);}
   return response;
  }

@@ -73,5 +73,5 @@ test('native fetch is invoked without the SupabaseClient receiver',async()=>{
  const {SupabaseClient}=await import('../cloudflare/supabase-client.mjs');
  let receiver;
  const client=new SupabaseClient(b.env,function(){receiver=this;return Promise.resolve(Response.json({ok:true}));});
- await client.request('/rest/v1/rpc/np_rpc');assert.equal(receiver,undefined);
+ await client.request('/rest/v1/rpc/np_rpc');assert.equal(receiver,globalThis);
 });
