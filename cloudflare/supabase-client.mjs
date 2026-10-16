@@ -4,7 +4,7 @@ export class SupabaseClient{
  constructor(env,fetcher=fetch){
   try{this.url=new URL(env.SUPABASE_URL);if(this.url.protocol!=='https:'||this.url.pathname!=='/'||this.url.username||this.url.password)throw Error();}catch{throw new AppError('무료 서버 연결 설정이 아직 완료되지 않았습니다.',503);}
   if(!env.SUPABASE_SERVICE_ROLE_KEY)throw new AppError('무료 서버 연결 설정이 아직 완료되지 않았습니다.',503);
-  this.key=env.SUPABASE_SERVICE_ROLE_KEY;this.fetcher=fetcher;
+  this.key=env.SUPABASE_SERVICE_ROLE_KEY;this.fetcher=(input,options)=>fetcher(input,options);
  }
  async request(path,options={}){
   const headers=new Headers(options.headers);headers.set('apikey',this.key);headers.set('Authorization','Bearer '+this.key);

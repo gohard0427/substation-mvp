@@ -67,3 +67,11 @@ test('pending reservations count toward quota and cleanup retries preserve metad
  const {SupabaseClient}=await import('../cloudflare/supabase-client.mjs');await sweep(new SupabaseClient(b.env,b.fetcher));
  assert.equal((await b.db.query('select count(*)::int as n from np_jobs where id=$1',[job.id])).rows[0].n,0);
 });
+
+// Cloudflare fetch rejects an arbitrary object receiver, unlike Node fetch.
+test('native fetch is invoked without the SupabaseClient receiver',async()=>{
+ const {SupabaseClient}=await import('../cloudflare/supabase-client.mjs');
+ let receiver;
+ const client=new SupabaseClient(b.env,function(){receiver=this;return Promise.resolve(Response.json({ok:true}));});
+ await client.request('/rest/v1/rpc/np_rpc');assert.equal(receiver,undefined);
+});
