@@ -4,19 +4,20 @@ import {validateImage} from '../shared/free-model.mjs';
 export const REF_BUCKET='np-reference-private';
 export const aiConfigured=env=>env.AI_ENABLED==='true'&&!!env.OPENAI_API_KEY;
 export const totalLimit=env=>Math.max(1,Math.min(100,Number.parseInt(env.AI_TOTAL_LIMIT||'100',10)||100));
-export const dailyLimit=env=>Math.max(1,Math.min(200,Number.parseInt(env.AI_DAILY_LIMIT||'20',10)||20));
+export const dailyLimit=(env,cfg={})=>Math.max(1,Math.min(100,Number.parseInt(cfg.aiDailyLimit??env.AI_DAILY_LIMIT??'20',10)||20));
 export async function referenceRoute({path,request,client,admin,readJson,body,json,env,fetcher}){
  admin();
  if(path==='/api/ai-status'&&request.method==='GET')return json(await checkVisionConnection(env,fetcher));
  if(path==='/api/references'&&request.method==='GET')return json(await client.aiRpc('references_list'));
  if(path==='/api/ai-usage'&&request.method==='GET')return json(await client.aiRpc('usage'));
- const match=path.match(/^\/api\/references\/([a-f0-9-]{36})(?:\/(image))?$/);if(!match)throw new AppError('요청 경로를 확인하세요.',404);
+ const match=path.match(/^\/api\/references\/([a-f0-9-]{36})(?:\/(image|plate))?$/);if(!match)throw new AppError('요청 경로를 확인하세요.',404);
  const [,id,imageAction]=match;const ref=await client.aiRpc('reference_get',{id});
  if(imageAction&&request.method==='GET'){
-  if(!ref.object_path)throw new AppError('아직 참고 사진을 연결하지 않았습니다.',404);
-  const response=await client.request(`/storage/v1/object/${REF_BUCKET}/${ref.object_path}`);return new Response(response.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+  const objectPath=imageAction==='plate'?(ref.ocr_raw?.hasExistingPlate===false?null:ref.ocr_raw?.reviewPlatePath):ref.object_path;
+  if(!objectPath||!objectPath.startsWith(id+'/')||!/^[-a-f0-9/]+(?:-plate)?\.jpg$/.test(objectPath))throw new AppError('아직 참고 사진을 연결하지 않았습니다.',404);
+  const response=await client.request(`/storage/v1/object/${REF_BUCKET}/${objectPath}`);return new Response(response.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
  }
- if(imageAction&&request.method==='POST'){
+ if(imageAction==='image'&&request.method==='POST'){
   const bytes=await body(request,1048576);const info=validateImage(bytes);if(info.mime!=='image/jpeg'||info.width>960||info.height>720||info.width*3!==info.height*4)throw new AppError('참고 사본 규격을 확인하세요.');
   let values;try{values=signature(JSON.parse(request.headers.get('X-Visual-Signature')));}catch{throw new AppError('이미지 특징 정보를 확인하세요.');}
   const objectPath=id+'/'+crypto.randomUUID()+'.jpg';await client.aiRpc('reference_reserve',{id,objectPath,bytes:bytes.length,visualSignature:{version:FEATURE_VERSION,values}});
@@ -40,7 +41,7 @@ export async function analysePhoto({request,env,client,job,photoId,args,body,fet
  let features;try{features=signature(JSON.parse(request.headers.get('X-Visual-Signature')));}catch{throw new AppError('분석 이미지 특징을 확인하세요.');}
  const references=await client.aiRpc('references_list'),selected=nearest(references,features,analysisHint(photo));
  const cfg=await client.rpc('config_get');const model=visionModel(env),context=equipmentContext(job,photo);const fingerprint=await analysisFingerprint(photo,cfg,selected,model,context);
- const claim=await client.aiRpc('analysis_claim',{...args,jobId:job.id,photoId,signature:fingerprint,revision:job.revision,limit:dailyLimit(env),totalLimit:totalLimit(env)});
+ const claim=await client.aiRpc('analysis_claim',{...args,jobId:job.id,photoId,signature:fingerprint,revision:job.revision,limit:dailyLimit(env,cfg),totalLimit:totalLimit(env)});
  let result,usage;
  try{
   if(claim.cached){result=claim.run.result;usage=claim.run.usage;}

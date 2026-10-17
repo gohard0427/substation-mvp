@@ -46,7 +46,8 @@ async function readEntry(entry){
  await entry.getData(new WritableStream({write(chunk){bytes+=chunk.byteLength;if(bytes>LIMITS.source)throw Error('압축 해제된 사진이 8MiB를 초과했습니다.');chunks.push(chunk);}}),{useWebWorkers:false,checkSignature:true});
  return new Blob(chunks);
 }
-export async function inspectUpload(files){
+export async function inspectUpload(files,{maxPhotos=LIMITS.photos}={}){
+ maxPhotos=Math.min(2000,Math.max(1,maxPhotos));
  const warnings=[],items=[],readers=[];let expanded=0;
  try{
   for(const file of files){
@@ -69,7 +70,7 @@ export async function inspectUpload(files){
     if(file.size>LIMITS.source)throw Error('사진당 최대 8MiB입니다.');items.push({path:safePath(file.name),size:file.size,read:async()=>file});
    }
   }
-  if(!items.length)throw Error('처리할 사진이 없습니다.');if(items.length>LIMITS.photos)throw Error('무료 MVP는 작업당 최대 50장입니다. ZIP을 나누어 주세요.');
+  if(!items.length)throw Error('처리할 사진이 없습니다.');if(items.length>maxPhotos)throw Error(`이번 업로드는 최대 ${maxPhotos}장입니다. ZIP을 나누어 주세요.`);
   return {items,warnings,close:async()=>{for(const reader of readers)await reader.close();}};
  }catch(error){for(const reader of readers)await reader.close();throw error;}
 }

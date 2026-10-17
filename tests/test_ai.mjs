@@ -68,3 +68,7 @@ test('admin connection probe sends no photos and performs no billable inference'
  await assert.rejects(checkVisionConnection({},()=>{throw Error('must not call');}),/Secret/);
  const worker=b.client();await worker.login();assert.equal((await worker.request('/api/ai-status')).status,403);
 });
+
+test('only admin can change daily trial calls; total trial cap stays independent',async()=>{
+ const isolated=await backend();try{const worker=isolated.client(),admin=isolated.client();await worker.login();await admin.login('admin');assert.equal((await worker.request('/api/settings',{aiDailyLimit:100})).status,403);assert.equal((await admin.request('/api/settings',{aiDailyLimit:101})).status,400);const saved=await admin.request('/api/settings',{aiDailyLimit:100});assert.equal(saved.status,200);const settings=await(await worker.request('/api/settings')).json();assert.equal(settings.aiDailyLimit,100);assert.equal(settings.aiTotalLimit,100);}finally{await isolated.db.close();}
+});

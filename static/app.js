@@ -43,7 +43,7 @@ async function boot() {
   $('#freeModeInfo').hidden = !browserEngine;
   $('#modeLabel').textContent = browserEngine ? '무료 · 하루 작업 MVP' : '수동 작업 MVP';
   $('#uploadLimit').textContent = browserEngine ? 'JPG · PNG · ZIP / 작업당 최대 50장 · ZIP 90MiB' : 'JPG · PNG · ZIP / 최대 200MB';
-  $('#project').value = settings.project;
+  $('#project').value = settings.project;$('#aiDailyLimit').value=settings.aiDailyLimit||20;$('#aiDailyLimit').closest('label').hidden=!browserEngine;
   $('#extraProjects').value = (settings.projects||[]).filter(v=>v!==settings.project).join('\n');
   $('#workTypes').value = settings.workTypes.join('\n');
   $('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join('');
@@ -73,7 +73,7 @@ $('#loginForm').onsubmit = async event => {
 };
 $('#checkAi').onclick = run(async()=>{ const button=$('#checkAi');button.disabled=true;try{const result=await api('/api/ai-status');$('#aiStatus').textContent=result.message+(result.analysisEnabled?'':' AI_ENABLED=true 설정과 재배포가 필요합니다.');}finally{button.disabled=false;} });
 $('#restore').onclick = run(async () => { if (!blocked) await flush(); await list(); notice('저장된 작업을 선택하세요. 충돌이 있었다면 다시 불러온 내용이 적용됩니다.'); });
-$('#saveSettings').onclick = run(async () => {if(!browserEngine){await api('/api/settings',{project:$('#project').value});settings.project=$('#project').value;notice('공사명을 저장했습니다.');return;} const saved=await api('/api/settings', {project:$('#project').value,extraProjects:$('#extraProjects').value.split('\n').map(v=>v.trim()).filter(Boolean)});settings.project=saved.project||settings.project;settings.projects=saved.projects||[settings.project];if(job)renderJobProject();notice('기본 공사명과 추가 공사명 목록을 저장했습니다.'); });
+$('#saveSettings').onclick = run(async () => {if(!browserEngine){await api('/api/settings',{project:$('#project').value});settings.project=$('#project').value;notice('공사명을 저장했습니다.');return;} const saved=await api('/api/settings', {project:$('#project').value,aiDailyLimit:Number($('#aiDailyLimit').value),extraProjects:$('#extraProjects').value.split('\n').map(v=>v.trim()).filter(Boolean)});settings.aiDailyLimit=saved.aiDailyLimit||settings.aiDailyLimit;settings.project=saved.project||settings.project;settings.projects=saved.projects||[settings.project];if(job)renderJobProject();notice('공사명과 AI 호출 한도 설정을 저장했습니다.'); });
 $('#revoke').onclick = run(async () => { if (confirm('모든 기기의 로그인 세션을 종료할까요?')) { await flush(); await api('/api/revoke', {}); location.reload(); } });
 async function uploadSelectedFiles(files) {
   files=Array.from(files||[]);if(!files.length)return;

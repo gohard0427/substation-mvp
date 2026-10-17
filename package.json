@@ -16,7 +16,8 @@
     "test:maintenance": "node tests/test_maintenance.mjs",
     "test:zip": "node tests/test_zip_safety.mjs",
     "test:e2e": "npm run build && node tests/test_e2e.mjs",
-    "test:audit": "npm run test:free && npm run test:ai && npm run test:maintenance && npm run test:zip && npm test && npm run test:browser && node tests/test_e2e.mjs"
+    "test:audit": "npm run test:free && npm run test:ai && npm run test:maintenance && npm run test:zip && npm test && npm run test:browser && node tests/test_e2e.mjs",
+    "test:reference-import": "node tests/test_reference_import.mjs"
   },
   "engines": {
     "node": ">=22"
