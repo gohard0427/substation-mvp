@@ -101,7 +101,7 @@ function open(value) {
     <a data-result class="button secondary" hidden>완성 사진 다운로드 ↓</a>
     <p data-preview-label class="muted">방향 보정 미리보기</p>
     ${p.duplicate ? '<span class="tag">중복 사진 · 유지됨</span>' : ''}
-    <label>방향 보정<select data-key="rotation">${[0,1,2,3].map(n => `<option value="${n}" ${p.rotation === n ? 'selected' : ''}>${n * 90}° 회전</option>`).join('')}</select></label></div>
+    <details class="photo-rotation"><summary>사진 회전</summary><label>자동 보정 방향에서 추가 회전<select data-key="rotation">${[0,1,2,3].map(n => `<option value="${n}" ${p.rotation === n ? 'selected' : ''}>${n === 0 ? '추가 회전 없음' : n * 90 + '° 회전'}</option>`).join('')}</select></label></details></div>
     <div><div class="grid">${[['date','일자','date'], ['location','위치','text'], ['equipment','기기명','text']].map(([key,label,type]) => `<label>${label}<input data-key="${key}" type="${type}" value="${esc(p[key])}"></label>`).join('')}</div>
     <label>작업 내용 · 직접 확정<input data-key="work" value="${esc(p.work)}" list="works" placeholder="사진에 해당하는 작업 하나를 입력"></label>
     <details class="photo-options"><summary>추가 설정 · 설비 정보</summary><label>설비 타입 · 선택 입력<input data-key="equipmentType" value="${esc(p.equipmentType)}"></label><label class="check"><input data-key="measurementScene" type="checkbox" ${p.measurementScene ? 'checked' : ''}>측정 장면입니다 · 구분 필요 규칙 적용</label>
