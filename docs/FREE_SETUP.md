@@ -38,18 +38,20 @@ Pages의 Variables and Secrets에 다음 값을 **서버 환경 변수**로 설�
 
 ## 3. 24시간 정리 — 필수
 
-프런트엔드 배포만으로 정기 삭제가 시작되지는 않습니다. Supabase CLI를 로그인한 뒤 프로젝트에 연결하고 함수 배포:
+현재 운영 프로젝트에는 아래 설정을 적용하고 실제 정리·예약 실행을 확인했습니다. 신규 설치에서는 기존 테이블 다음에 `supabase/schema/maintenance.sql`을 적용합니다. 이전 설치는 `supabase/schema/runtime-upgrade.sql`로 공사명·로그아웃·최근 활동 갱신도 업그레이드할 수 있습니다.
+
+CLI에서 프로젝트 연결 후:
 
 ```sh
 supabase link --project-ref 프로젝트ID
 supabase functions deploy np-cleanup --no-verify-jwt
 ```
 
-함수는 JWT 자동 검증 대신 서버에서 service_role bearer를 직접 비교합니다. 내장 `SUPABASE_URL`과 `SUPABASE_SERVICE_ROLE_KEY` 환경을 사용합니다. 배포 번들에서 루트 `cloudflare/supabase-client.mjs`와 `_shared/cleanup.mjs` import가 포함되는지 확인합니다.
+`supabase/schedule-cleanup.sql`의 `YOUR_PROJECT_REF`를 실제 프로젝트 ID로 바꿔 SQL Editor에서 실행합니다. 이 SQL은 pg_cron·pg_net을 활성화하고 Vault에 전용 정리 토큰과 프로젝트 URL을 등록합니다. 토큰 원문은 반환하지 않고, 해시만 서버 전용 표에 둡니다. **service_role 키를 SQL에 붙이거나 Vault로 복사할 필요가 없습니다.** Edge 함수의 내장 서버 환경 키는 함수 내부에서만 사용합니다.
 
-Supabase Vault 화면에서 `np_project_url`(프로젝트 URL)과 `np_service_role_key`(service_role)를 등록합니다. 값이 담긴 SQL을 저장소에 기록하지 않습니다. 이어서 SQL Editor에서 `supabase/schedule-cleanup.sql`을 실행합니다. pg_cron/pg_net 확장과 Vault 사용 가능 상태를 확인합니다.
+함수는 전용 토큰을 자체 검증합니다. JWT 자동 검증을 끄더라도 인증 없는 요청은 거절합니다. cron은 15분마다 만료 작업을 정리합니다. 앱 관리자 화면에서 최근 정리 성공 시각을 확인하세요. SQL 실행 성공만으로 운영 검증을 끝내지 말고 cron 기록·함수 2xx·실제 버킷 파일 제거를 확인합니다.
 
-15분마다 만료된 작업을 정리하므로 파일 삭제는 만료 시각 이후 최대 예약 간격과 처리 시간만큼 지연될 수 있습니다. API 접근은 24시간 만료 즉시 차단됩니다. 삭제 실패 시 메타데이터/용량 예약을 유지해 다음 실행에서 재시도합니다. cron 실행 로그, 함수 2xx, 버킷 파일 제거를 실제로 확인한 후 운영합니다. Edge Function 오류나 무료 프로젝트 일시 중지 중에는 정리가 지연됩니다.
+파일 삭제는 만료 시각 이후 예약 간격과 처리 시간만큼 지연될 수 있습니다. 만료된 API 접근은 즉시 차단합니다. 삭제 실패 시 파일 예약을 유지해 다음 실행에서 재시도합니다. 무료 프로젝트 일시 중지나 서비스 장애 중에는 정리가 지연될 수 있습니다.
 
 ## 4. 운영 전 직접 확인
 

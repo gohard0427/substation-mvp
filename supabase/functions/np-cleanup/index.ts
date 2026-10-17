@@ -1,8 +1,7 @@
 import {SupabaseClient} from '../../../cloudflare/supabase-client.mjs';
-import {sweep} from '../_shared/cleanup.mjs';
-Deno.serve(async (request:Request) => {
- const url=Deno.env.get('SUPABASE_URL'),key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
- if(!key || request.method!=='POST' || request.headers.get('Authorization')!=='Bearer '+key)return Response.json({error:'Forbidden'},{status:403});
- try{return Response.json(await sweep(new SupabaseClient({SUPABASE_URL:url,SUPABASE_SERVICE_ROLE_KEY:key})),{headers:{'Cache-Control':'no-store'}});}
- catch{return Response.json({error:'Cleanup failed; reservations retained for retry.'},{status:503});}
+import {maintenanceHandler} from '../_shared/maintenance.mjs';
+const probe=Uint8Array.from(atob('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAADAAQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwAooooA/9k='),c=>c.charCodeAt(0));
+Deno.serve(async (request:Request)=>{
+ try{return await maintenanceHandler(request,new SupabaseClient({SUPABASE_URL:Deno.env.get('SUPABASE_URL'),SUPABASE_SERVICE_ROLE_KEY:Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}),probe);}
+ catch{return Response.json({error:'Cleanup configuration unavailable'},{status:503});}
 });

@@ -38,13 +38,15 @@ async function boot() {
   $('#modeLabel').textContent = browserEngine ? '무료 · 하루 작업 MVP' : '수동 작업 MVP';
   $('#uploadLimit').textContent = browserEngine ? 'JPG · PNG · ZIP / 작업당 최대 50장 · ZIP 90MiB' : 'JPG · PNG · ZIP / 최대 200MB';
   $('#project').value = settings.project;
+  $('#extraProjects').value = (settings.projects||[]).filter(v=>v!==settings.project).join('\n');
   $('#workTypes').value = settings.workTypes.join('\n');
   $('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join('');
   $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
-  $('#login').hidden = true;
+  $('#login').hidden = true;$('#logout').hidden=!browserEngine;$('#project').readOnly=!!browserEngine;$('#extraProjects').closest('label').hidden=!browserEngine;$('#jobProjectPanel').hidden=!browserEngine;$('#referenceAdminPanel').hidden=!browserEngine;
   $('#workspace').hidden = false;
   $('#admin').hidden = settings.role !== 'admin';
   if(browserEngine && settings.role === 'admin') { const referenceRoot = document.querySelector('#referenceAdmin'); if(referenceRoot) { try { const module=await import('./reference-admin.mjs'); await module.mount(referenceRoot,api,notice,()=>notice('작업 목록은 화면을 새로고침하면 반영됩니다.')); } catch(e) { notice(e.message); } } }
+  if(browserEngine&&settings.role==='admin'){try{const status=await api('/api/maintenance');$('#maintenanceStatus').textContent=status.lastSuccessAt?'서버 자동 정리 최근 성공: '+new Date(status.lastSuccessAt).toLocaleString('ko-KR'):'서버 자동 정리 실행 기록이 아직 없습니다.';}catch{$('#maintenanceStatus').textContent='서버 자동 정리 상태를 확인하지 못했습니다.';}}
   renderGroups();
   await list();
 }
@@ -54,7 +56,7 @@ async function list() {
   for (const saved of jobs) {
     const button = document.createElement('button'); button.className = 'secondary';
     button.textContent = `${saved.photos.length}장 · ${saved.photos[0]?.group} · ${stateNames[saved.state] || saved.state}`;
-    button.onclick = run(async () => { if (!blocked) await flush(); open(await api('/api/jobs/' + saved.id)); });
+    button.onclick = run(async () => { if (!blocked) await flush(); open(saved.state==='deleting'?{...saved,warnings:saved.warnings||[]}:await api('/api/jobs/' + saved.id+'?touch=1')); });
     $('#jobs').append(button);
   }
 }
@@ -64,9 +66,10 @@ $('#loginForm').onsubmit = async event => {
   catch (error) { notice(error.message); }
 };
 $('#restore').onclick = run(async () => { if (!blocked) await flush(); await list(); notice('저장된 작업을 선택하세요. 충돌이 있었다면 다시 불러온 내용이 적용됩니다.'); });
-$('#saveSettings').onclick = run(async () => { await api('/api/settings', {project:$('#project').value}); notice('공사명을 저장했습니다. 다음 생성부터 적용됩니다.'); });
+$('#saveSettings').onclick = run(async () => {if(!browserEngine){await api('/api/settings',{project:$('#project').value});settings.project=$('#project').value;notice('공사명을 저장했습니다.');return;} const saved=await api('/api/settings', {project:$('#project').value,extraProjects:$('#extraProjects').value.split('\n').map(v=>v.trim()).filter(Boolean)});settings.project=saved.project||settings.project;settings.projects=saved.projects||[settings.project];if(job)renderJobProject();notice('기본 공사명과 추가 공사명 목록을 저장했습니다.'); });
 $('#revoke').onclick = run(async () => { if (confirm('모든 기기의 로그인 세션을 종료할까요?')) { await flush(); await api('/api/revoke', {}); location.reload(); } });
 $('#upload').onchange = async event => {
+  if(busy){event.target.value='';return;}busy=true;update();
   try {
     await flush();
     if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles([...event.target.files],api,notice)); await list(); notice('업로드 완료. 서버에 작업용 사본과 진행 상태를 저장했습니다.'); } finally { busy = false; update(); } return; }
@@ -77,12 +80,13 @@ $('#upload').onchange = async event => {
     }
     await list(); notice('업로드 완료. 사진별 정보를 검토하세요.');
   } catch (error) { notice(error.message); }
-  finally { event.target.value = ''; }
+  finally { busy=false;update();event.target.value = ''; }
 };
 function open(value) {
   clearTimeout(autosave); clearTimeout(poll); browserEngine?.clearPreviews();
   job = value; editEpoch = savedEpoch = 0; blocked = false;
   $('#editor').hidden = false;
+  renderJobProject();
   $('#jobTitle').textContent = `${job.photos.length}장의 작업 사진`;
   $('#warnings').textContent = job.warnings.join(' / ');
   $('#group').innerHTML = [...new Set(job.photos.map(p => p.group))].map(group => `<option>${esc(group)}</option>`).join('');
@@ -97,7 +101,7 @@ function open(value) {
     <label>작업 내용 · 직접 확정<input data-key="work" value="${esc(p.work)}" list="works" placeholder="사진에 해당하는 작업 하나를 입력"></label>
     <label class="check"><input data-key="measurementScene" type="checkbox" ${p.measurementScene ? 'checked' : ''}>측정 장면입니다 · 구분 필요 규칙 적용</label>
     <div data-ambiguity class="alert" hidden><strong>작업 내용 확인 필요</strong><p data-reason></p><label>직접 선택<select data-choice></select></label><p class="muted">기타를 선택하면 위 작업 내용란에 직접 입력하세요.</p></div>
-    <label class="check"><input data-key="hasExistingPlate" type="checkbox" ${p.hasExistingPlate ? 'checked' : ''}>기존 명판이 있는 사진 · AI 분석 사본에서 명판 가리기</label><div data-recommendations></div>
+    <label class="check"><input data-key="hasExistingPlate" type="checkbox" ${p.hasExistingPlate ? 'checked' : ''}>${browserEngine ? '기존 명판이 있는 사진 · 검수 표시 (AI 사본은 기본 영역을 항상 가립니다)' : '기존 명판이 있는 사진 · AI 분석 사본에서 명판 가리기'}</label><div data-recommendations></div>
     <label class="check"><input data-key="confirmed" type="checkbox" ${p.confirmed ? 'checked' : ''}>정보와 작업 내용을 확인했습니다</label>
     <label class="check"><input data-key="excluded" type="checkbox" ${p.excluded ? 'checked' : ''}>이번 결과물에서 제외</label></div></article>`).join('');
   $('#photos').oninput = onPhotoInput;
@@ -129,7 +133,18 @@ function markDirty() {
   clearTimeout(autosave);
   autosave = setTimeout(() => persist().catch(error => notice(error.message)), 900);
 }
+
+function renderJobProject(){
+ const select=document.querySelector('#jobProjectSelect');if(!select||!job)return;
+ const value=job.project||(['ready','generating'].includes(job.state)?job.generation?.project:'')||settings.project;job.project=value;
+ const projects=settings.projects||[settings.project];select.innerHTML=projects.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')+'<option value="__custom__">다른 공사명 직접 입력</option>';
+ select.value=projects.includes(value)?value:'__custom__';$('#jobProjectCustom').value=value;$('#jobProjectCustomLabel').hidden=select.value!=='__custom__';
+}
+$('#jobProjectSelect').onchange=()=>{if(!job||busy)return;const value=$('#jobProjectSelect').value;$('#jobProjectCustomLabel').hidden=value!=='__custom__';job.project=value==='__custom__'?$('#jobProjectCustom').value:value;markDirty();update();};
+$('#jobProjectCustom').oninput=()=>{if(!job||busy)return;job.project=$('#jobProjectCustom').value;markDirty();update();};
+
 function update() {
+  $('#upload').disabled=busy;$('#restore').disabled=busy;$('#logout').disabled=busy;for(const button of document.querySelectorAll('#jobs button'))button.disabled=busy;
   if (!job) return;
   const counts = {};
   for (const photo of job.photos) { const status = statusFor(photo); counts[status] = (counts[status] || 0) + 1; }
@@ -138,7 +153,8 @@ function update() {
   $('#reviewSummary').textContent = Object.entries(counts).map(([name,count]) => `${name} ${count}장`).join(' · ');
   const locked = busy || ['analysis_queued','analysing','queued','generating'].includes(job.state);
   $('#analyse').disabled = locked || blocked || !settings.aiConfigured || !selected.length;
-  $('#generate').disabled = job.state === 'deleting' || locked || blocked || !selected.length || selected.some(p => !p.confirmed || !resolved(p) || ['date','location','equipment','work'].some(k => !p[k]?.trim()));
+  $('#jobProjectSelect').disabled=locked||blocked;$('#jobProjectCustom').disabled=locked||blocked;
+  $('#generate').disabled = !job.project?.trim() || job.state === 'deleting' || locked || blocked || !selected.length || selected.some(p => !p.confirmed || !resolved(p) || ['date','location','equipment','work'].some(k => !p[k]?.trim()));
   $('#save').disabled = locked || blocked;
   $('#applyBatch').disabled = locked || blocked;
   $('#download').hidden = job.state !== 'ready' || editEpoch !== savedEpoch;
@@ -155,7 +171,7 @@ function update() {
     const photo = job.photos.find(p => p.id === card.dataset.id);
     const ready = job.state === 'ready' && !photo.excluded;
     const src = ready ? `/api/jobs/${job.id}/result/${photo.id}?v=${job.revision}` : `/api/jobs/${job.id}/image/${photo.id}?rotation=${photo.rotation}`;
-    const img = card.querySelector('[data-preview]'); if (browserEngine) browserEngine.setPreview(img,job,photo,ready); else if (img.getAttribute('src') !== src) img.src = src;
+    const img = card.querySelector('[data-preview]'); if(job.state==='deleting'){img.removeAttribute('src');img.alt='서버 사진 삭제 중';}else if (browserEngine) browserEngine.setPreview(img,job,photo,ready); else if (img.getAttribute('src') !== src) img.src = src;
     const link = card.querySelector('[data-result]'); link.hidden = !ready;
     link.href = `/api/jobs/${job.id}/result/${photo.id}?download=1`;
     card.querySelector('[data-preview-label]').textContent = ready ? '명판 합성 결과' : '방향 보정 미리보기';
@@ -187,7 +203,7 @@ function persist() {
     const epoch = editEpoch;
     const photos = JSON.parse(JSON.stringify(target.photos));
     try {
-      const saved = await api(`/api/jobs/${target.id}/save`, {photos, revision:target.revision || 0});
+      const saved = await api(`/api/jobs/${target.id}/save`, {photos, project:target.project||settings.project, revision:target.revision || 0});
       if (job !== target) return;
       target.revision = saved.revision; savedEpoch = epoch;
       if (editEpoch === epoch) { target.state = saved.state; target.photos = saved.photos; }
@@ -215,6 +231,7 @@ async function exclusive(fn) {
   busy = true; update();
   try { await flush(); await fn(); } finally { busy = false; update(); }
 }
+$('#logout').onclick=run(async()=>{if(busy)return;await flush();await api('/api/logout',{});location.reload();});
 $('#save').onclick = run(async () => { await flush(); notice('서버에 진행 상태를 저장했습니다.'); });
 $('#applyBatch').onclick = run(async () => exclusive(async () => {
   for (const photo of job.photos.filter(p => p.group === $('#group').value)) {

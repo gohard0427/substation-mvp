@@ -9,9 +9,10 @@ export class SupabaseClient{
  async request(path,options={}){
   const headers=new Headers(options.headers);headers.set('apikey',this.key);headers.set('Authorization','Bearer '+this.key);
   let response;try{response=await this.fetcher(new URL(path,this.url).toString(),{...options,headers,redirect:'manual'});}catch(error){const code=/illegal invocation|incorrect.*this/i.test(error.message||'')?'FETCH_RECEIVER':/resolve|dns/i.test(error.message||'')?'DNS':/header/i.test(error.message||'')?'HEADER':/receiver|Illegal invocation|requires.*this/i.test(error.message||'')?'FETCH_RECEIVER':/network connection lost/i.test(error.message||'')?'CONNECTION_LOST':/not a function/i.test(error.message||'')?'FETCH_TYPE':/fetch failed/i.test(error.message||'')?'FETCH_FAILED':/Invalid URL/i.test(error.message||'')?'URL':/redirect/i.test(error.message||'')?'REDIRECT':'NETWORK';throw new AppError('서버 연결에 실패했습니다. 오류 코드: '+code,503);}
-  if(!response.ok){let detail={};try{detail=await response.json();}catch{}const entry=messages[detail.message];throw new AppError(entry?.[0]||'서버 요청을 처리하지 못했습니다. 연결 설정 또는 저장 한도를 확인하세요.',entry?.[1]||503);}
+  if(!response.ok){let detail={};try{detail=await response.json();}catch{}const entry=messages[detail.message];const error=new AppError(entry?.[0]||'서버 요청을 처리하지 못했습니다. 연결 설정 또는 저장 한도를 확인하세요.',entry?.[1]||503);error.upstreamStatus=response.status;throw error;}
   return response;
  }
+ async maintenanceRpc(action,data={}){const response=await this.request('/rest/v1/rpc/np_maintenance_rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_action:action,p_data:data})});return response.json();}
  async aiRpc(action,data={}){const response=await this.request('/rest/v1/rpc/np_ai_rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_action:action,p_data:data})});return response.json();}
  async rpc(action,data={}){const response=await this.request('/rest/v1/rpc/np_rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_action:action,p_data:data})});return response.json();}
 }

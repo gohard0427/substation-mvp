@@ -1,3 +1,4 @@
+import {checkZipDirectory,zipEntryPath} from '../shared/zip-safety.mjs';
 import {ZipReader,ZipWriter,BlobReader,BlobWriter} from '@zip.js/zip.js';
 import {LIMITS,PROFILE,safePath,hash,outputPaths,validateImage} from '../shared/free-model.mjs';
 const placeholder='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="640" height="480"%3E%3Crect width="100%25" height="100%25" fill="%23e9eeea"/%3E%3C/svg%3E';
@@ -51,10 +52,11 @@ export async function inspectUpload(files){
   for(const file of files){
    if(/\.zip$/i.test(file.name)){
     if(file.size>LIMITS.zip)throw Error('ZIP은 최대 90MiB입니다. 하루 단위로 나누어 주세요.');
+    await checkZipDirectory(file);
     const reader=new ZipReader(new BlobReader(file),{useWebWorkers:false});readers.push(reader);const entries=await reader.getEntries();
     if(entries.length>2000)throw Error('ZIP 항목은 최대 2,000개입니다.');
     for(const entry of entries){
-     const path=safePath(entry.filename);if(entry.directory)continue;
+     const path=safePath(zipEntryPath(entry));if(entry.directory)continue;
      if(entry.encrypted)throw Error('암호화 ZIP은 지원하지 않습니다.');
      if(entry.uncompressedSize>LIMITS.source||entry.uncompressedSize/Math.max(entry.compressedSize,1)>200)throw Error('ZIP의 파일 크기 또는 압축 비율 제한을 초과했습니다.');
      expanded+=entry.uncompressedSize;if(expanded>LIMITS.expanded)throw Error('압축 해제 용량은 최대 150MiB입니다. ZIP을 나누어 주세요.');
@@ -126,7 +128,7 @@ export function downloadPlans(job,date){
 export async function downloadZip(job,entries,progress){
  const writer=new ZipWriter(new BlobWriter('application/zip'),{level:0,useWebWorkers:false});
  try{
-  for(let i=0;i<entries.length;i++){const {photo,path}=entries[i];progress(`ZIP 준비 중 ${i+1}/${entries.length}`);const blob=await (await checked(await fetch(`/api/jobs/${job.id}/result/${photo.id}`))).blob();if(blob.size>LIMITS.result)throw Error('출력 파일 크기 제한을 초과했습니다.');await writer.add(path,new BlobReader(blob),{level:0,useWebWorkers:false});}
+  for(let i=0;i<entries.length;i++){const {photo,path}=entries[i];progress(`ZIP 준비 중 ${i+1}/${entries.length}`);const blob=await (await checked(await fetch(`/api/jobs/${job.id}/result/${photo.id}`,{headers:{'X-User-Activity':'download'}}))).blob();if(blob.size>LIMITS.result)throw Error('출력 파일 크기 제한을 초과했습니다.');await writer.add(path,new BlobReader(blob),{level:0,useWebWorkers:false});}
   return await writer.close();
  }catch(error){try{await writer.close();}catch{}throw error;}
 }
@@ -134,8 +136,8 @@ export function saveBlob(blob,name){const url=URL.createObjectURL(blob),link=doc
 
 export async function prepareAnalysis(blob,photo,mask={x:.44,y:.75}){
  // Mask before rotation so a manual turn cannot move an old answer outside the mask.
- const image=await bitmap(blob),out=canvas(image.width,image.height),ctx=out.getContext('2d');let masked;
- try{ctx.drawImage(image,0,0);ctx.fillStyle='#808080';const x=Math.max(0,Math.floor(image.width*mask.x)-5),y=Math.max(0,Math.floor(image.height*mask.y)-5);ctx.fillRect(x,y,image.width-x,image.height-y);masked=await jpeg(out,.85);}finally{image.close();out.width=out.height=0;}
+ const image=await bitmap(blob),scale=Math.min(1280/image.width,1280/image.height,1),out=canvas(Math.max(1,Math.round(image.width*scale)),Math.max(1,Math.round(image.height*scale))),ctx=out.getContext('2d');let masked;
+ try{ctx.drawImage(image,0,0,out.width,out.height);ctx.fillStyle='#808080';const x=Math.max(0,Math.floor(out.width*mask.x)-5),y=Math.max(0,Math.floor(out.height*mask.y)-5);ctx.fillRect(x,y,out.width-x,out.height-y);masked=await jpeg(out,.85);}finally{image.close();out.width=out.height=0;}
  const analysis=await renderPhoto(masked,photo,'',{plate:false,maxWidth:960});const im=await bitmap(analysis),small=canvas(64,64),s=small.getContext('2d',{willReadFrequently:true});
  try{
   s.drawImage(im,0,0,64,64);const pixels=s.getImageData(0,0,64,64).data,values=Array(64).fill(0);

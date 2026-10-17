@@ -3,7 +3,8 @@ import {readFile} from 'node:fs/promises';
 import {freeGateway} from '../../cloudflare/free-api.mjs';
 export async function backend({visionResult}={}){
  const db=new PGlite();await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');await db.exec(await readFile('supabase/migrations/001_free_mvp.sql','utf8'));
- await db.exec(await readFile('supabase/schema/ai-reference.sql','utf8'));
+ await db.exec(await readFile('supabase/schema/ai-reference.sql','utf8'));await db.exec(await readFile('supabase/schema/maintenance.sql','utf8'));
+ const maintenanceRpc=async(action,data={})=>(await db.query('select public.np_maintenance_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
  const aiRpc=async(action,data={})=>(await db.query('select public.np_ai_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
  const externalCalls=[];
  const objects=new Map(),env={SUPABASE_URL:'https://test-project.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'test-only-server-key',SUPABASE_ANON_KEY:'test-only-anon-key',WORKER_EMAIL:'worker@example.com',ADMIN_EMAIL:'admin@example.com',WORKER_USER_ID:'00000000-0000-4000-8000-000000000001',ADMIN_USER_ID:'00000000-0000-4000-8000-000000000002',PUBLIC_ORIGIN:'https://photos.example.com'};
@@ -16,8 +17,8 @@ export async function backend({visionResult}={}){
    if(input.password!=='test-only-password')return Response.json({error:'invalid credentials'},{status:400});return Response.json({user:{id:env[role+'_USER_ID']},access_token:'never-exposed',refresh_token:'never-exposed'});
   }
   if(headers.get('apikey')!==env.SUPABASE_SERVICE_ROLE_KEY)return Response.json({error:'not authorized'},{status:401});
-  if(path==='/rest/v1/rpc/np_rpc'||path==='/rest/v1/rpc/np_ai_rpc'){
-   try{const input=JSON.parse(options.body);return Response.json(await (path.endsWith("np_ai_rpc")?aiRpc:rpc)(input.p_action,input.p_data));}
+  if(path==='/rest/v1/rpc/np_rpc'||path==='/rest/v1/rpc/np_ai_rpc'||path==='/rest/v1/rpc/np_maintenance_rpc'){
+   try{const input=JSON.parse(options.body);return Response.json(await (path.endsWith("np_ai_rpc")?aiRpc:path.endsWith("np_maintenance_rpc")?maintenanceRpc:rpc)(input.p_action,input.p_data));}
    catch(error){return Response.json({message:error.message,code:error.code},{status:400});}
   }
   if(path.startsWith('/storage/v1/object/np-reference-private/')){const key='reference/'+decodeURIComponent(path.slice('/storage/v1/object/np-reference-private/'.length));if(options.method==='POST'){objects.set(key,new Uint8Array(options.body));return Response.json({Key:key});}if(!objects.has(key))return new Response(null,{status:404});return new Response(objects.get(key));}
@@ -40,5 +41,5 @@ export async function backend({visionResult}={}){
   },get cookie(){return jar;},set cookie(value){jar=value;},
   async login(role='worker'){const r=await this.request('/api/login',{role,password:'test-only-password'});if(!r.ok)throw Error(await r.text());return r;}
  };}
- return {db,env,rpc,aiRpc,objects,fetcher,client,externalCalls};
+ return {db,env,rpc,aiRpc,maintenanceRpc,objects,fetcher,client,externalCalls};
 }

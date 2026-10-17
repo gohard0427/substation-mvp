@@ -81,3 +81,14 @@ test('Cloudflare-compatible redirect mode never follows privileged redirects',as
  const client=new SupabaseClient(b.env,async function(url,options){calls++;assert.equal(options.redirect,'manual');return new Response(null,{status:302,headers:{Location:'https://untrusted.invalid'}});});
  await assert.rejects(client.rpc('config_get'),/서버 요청/);assert.equal(calls,1);
 });
+
+test('provider outage, throttling, bad key and UID mismatch are not reported as wrong password',async()=>{
+ const {freeGateway}=await import('../cloudflare/free-api.mjs');
+ for(const [status,message] of [[429,'요청 한도'],[503,'일시적으로'],[401,'API 키']]){
+  const request=new Request(b.env.PUBLIC_ORIGIN+'/api/login',{method:'POST',headers:{Origin:b.env.PUBLIC_ORIGIN},body:JSON.stringify({role:'worker',password:'test-only-password'})});
+  const response=await freeGateway(request,b.env,(url,options)=>new URL(url).pathname==='/auth/v1/token'?Promise.resolve(Response.json({error:'upstream error'},{status})):b.fetcher(url,options));
+  assert.equal(response.status,status===429?429:503);assert.ok((await response.json()).error.includes(message));
+ }
+ const request=new Request(b.env.PUBLIC_ORIGIN+'/api/login',{method:'POST',headers:{Origin:b.env.PUBLIC_ORIGIN},body:JSON.stringify({role:'worker',password:'test-only-password'})});
+ const response=await freeGateway(request,{...b.env,WORKER_USER_ID:'00000000-0000-4000-8000-000000000009'},b.fetcher);assert.equal(response.status,503);assert.match((await response.json()).error,/사용자 ID/);
+});

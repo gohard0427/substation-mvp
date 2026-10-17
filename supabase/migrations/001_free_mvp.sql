@@ -1,7 +1,7 @@
 -- Dedicated Supabase FREE project. No client table/RPC access is granted.
 begin;
 create table if not exists public.np_config(singleton boolean primary key default true check(singleton), payload jsonb not null);
-insert into public.np_config values(true,'{"project":"전력설비 점검 및 정비공사","workTypes":["대상 기기","작업 전","작업 후","분리","조립","청소","점검","교체","동작특성 시험","코일 저항 측정","PMA 전압 측정"],"ambiguityGroups":[{"id":"pma-measurement","name":"PMA 타입 GIS 측정","equipmentMatch":"PMA","options":["코일 저항 측정","PMA 전압 측정"],"reason":"측정 위치 및 계측기 동일","required":true}],"workerEpoch":1,"adminEpoch":1}') on conflict do nothing;
+insert into public.np_config values(true,'{"project":"2026~2026년도 시흥전력지사 변전협력회사 총액공사","workTypes":["대상 기기","작업 전","작업 후","분리","조립","청소","점검","교체","동작특성 시험","코일 저항 측정","PMA 전압 측정"],"ambiguityGroups":[{"id":"pma-measurement","name":"PMA 타입 GIS 측정","equipmentMatch":"PMA","options":["코일 저항 측정","PMA 전압 측정"],"reason":"측정 위치 및 계측기 동일","required":true}],"workerEpoch":1,"adminEpoch":1}') on conflict do nothing;
 create table if not exists public.np_sessions(token_hash text primary key check(token_hash ~ '^[a-f0-9]{64}$'),role text not null check(role in ('worker','admin')),user_id uuid not null,epoch bigint not null,expires_at timestamptz not null default now()+interval '12 hours');
 create table if not exists public.np_login_attempts(identity_hash text not null,created_at timestamptz not null default now());
 create index if not exists np_attempts_lookup on public.np_login_attempts(identity_hash,created_at);
@@ -33,6 +33,8 @@ begin
   role_value=p_data->>'role';epoch_key=case when role_value='admin' then 'adminEpoch' else 'workerEpoch' end;
   insert into public.np_sessions(token_hash,role,user_id,epoch) values(p_data->>'tokenHash',role_value,(p_data->>'userId')::uuid,(cfg->>epoch_key)::bigint);
   delete from public.np_login_attempts where identity_hash=p_data->>'identity';return '{}';
+ elsif p_action='session_delete' then
+  delete from public.np_sessions where token_hash=p_data->>'tokenHash';return '{}';
  elsif p_action='session_get' then
   select * into sess from public.np_sessions where token_hash=p_data->>'tokenHash' and expires_at>now();
   if not found then raise exception 'AUTH_REQUIRED';end if;
@@ -52,7 +54,7 @@ begin
   perform pg_advisory_xact_lock(70164001);
   if (select count(*) from public.np_jobs where device_hash=p_data->>'deviceHash' and expires_at>now())>=3 then raise exception 'DEVICE_JOB_LIMIT';end if;
   if (select count(*) from public.np_jobs)>=30 then raise exception 'JOB_LIMIT';end if;
-  insert into public.np_jobs(id,device_hash,capability_hash) values((p_data->>'id')::uuid,p_data->>'deviceHash',p_data->>'capabilityHash');
+  insert into public.np_jobs(id,device_hash,capability_hash,payload) values((p_data->>'id')::uuid,p_data->>'deviceHash',p_data->>'capabilityHash',jsonb_build_object('photos','[]'::jsonb,'warnings','[]'::jsonb,'project',cfg->>'project'));
   return public.np_rpc('job_get',p_data);
  elsif p_action='cleanup_list' then
   update public.np_jobs set state='deleting' where expires_at<=now();
@@ -77,6 +79,8 @@ begin
  if j.expires_at<=now() or j.state='deleting' then raise exception 'JOB_EXPIRED';end if;
  if p_action='job_get' then
   return j.payload || jsonb_build_object('id',j.id,'revision',j.revision,'state',j.state,'expiresAt',j.expires_at,'files',coalesce((select jsonb_agg(to_jsonb(x)-'meta') from public.np_files x where job_id=jid and status='ready'),'[]'));
+ elsif p_action='job_touch' then
+  update public.np_jobs set updated_at=now(),expires_at=now()+interval '24 hours' where id=jid;
  elsif p_action='job_save' then
   if j.state='generating' then raise exception 'GENERATION_ACTIVE';end if;
   if (p_data->>'revision')::bigint<>j.revision then raise exception 'REVISION_CONFLICT';end if;

@@ -1,3 +1,4 @@
+export const DEFAULT_PROJECT='2026~2026년도 시흥전력지사 변전협력회사 총액공사';
 export class ValidationError extends Error {}
 export const LIMITS={photos:50,source:8*1024*1024,result:2*1024*1024,zip:90*1024*1024,expanded:150*1024*1024,pixels:20_000_000,storage:700*1024*1024};
 export const PROFILE={width:911/2048,height:336/1536,label:132/2048,font:50/2048,padding:12/2048,version:'sample-profile-browser-v1'};
@@ -54,4 +55,4 @@ export function imageInfo(bytes){
  throw new ValidationError('JPEG/PNG 형식이나 사진 크기를 확인할 수 없습니다.');
 }
 export function validateImage(bytes,result=false){const info=imageInfo(bytes);if(!info.width||!info.height||info.width*info.height>LIMITS.pixels)throw new ValidationError('사진은 최대 2천만 픽셀입니다.');if(result&&(info.mime!=='image/jpeg'||info.width>1280||info.height>960||info.width*3!==info.height*4))throw new ValidationError('출력은 최대 1280×960의 가로 4:3 JPEG여야 합니다.');return info;}
-export function outputPaths(photos){const used=new Set();return photos.map(p=>{const base=safePath(p.path).replace(/\.[^.\/]+$/,'.jpg');let path=base,index=1;while(used.has(path))path=base.replace(/\.jpg$/,`_${p.id}_${index++}.jpg`);used.add(path);return {photo:p,path};});}
+export function outputPaths(photos){const used=new Set();return photos.map(p=>{const base=safePath(p.path).replace(/\.[^.\/]+$/,'.jpg');let path=base,index=1;while(used.has(path.normalize('NFC').toLowerCase()))path=base.replace(/\.jpg$/,`_${p.id}_${index++}.jpg`);used.add(path.normalize('NFC').toLowerCase());return {photo:p,path};});}
