@@ -1,7 +1,7 @@
 import {createServer} from 'node:http';import {readFile,mkdir} from 'node:fs/promises';import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';import {ZipWriter,ZipReader,BlobReader,BlobWriter} from '@zip.js/zip.js';
 import {backend} from './helpers/free-backend.mjs';import {freeGateway} from '../cloudflare/free-api.mjs';import {validateImage,DEFAULT_PROJECT,hash} from '../shared/free-model.mjs';
-const b=await backend(),errors=[];const mime={'.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.woff2':'font/woff2','.woff':'font/woff','.html':'text/html'};
+const b=await backend({visionResult:{equipmentType:'GIS',candidates:[{work:'동작특성 시험',reason:'시험기와 시험 연결선'}],observations:['시험기에 연결된 장면'],measurementScene:true,ambiguityGroupId:null,needsUserReview:true}}),errors=[];const mime={'.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.woff2':'font/woff2','.woff':'font/woff','.html':'text/html'};
 const server=createServer(async(req,res)=>{try{
  const url=new URL(req.url,b.env.PUBLIC_ORIGIN);if(url.pathname==='/favicon.ico'){res.statusCode=204;res.end();return;}
  if(url.pathname.startsWith('/api/')){const chunks=[];for await(const c of req)chunks.push(c);const body=req.method==='GET'?undefined:Buffer.concat(chunks);const request=new Request(url,{method:req.method,headers:req.headers,body});const response=await freeGateway(request,b.env,b.fetcher);res.statusCode=response.status;for(const [key,value] of response.headers)if(key!=='set-cookie')res.setHeader(key,value);const cookies=response.headers.getSetCookie();if(cookies.length)res.setHeader('Set-Cookie',cookies);res.end(new Uint8Array(await response.arrayBuffer()));return;}
@@ -35,5 +35,23 @@ try{
  const droppedPhotos=await otherPage.evaluateHandle(bytes=>{const transfer=new DataTransfer();for(const name of ['첫사진.jpg','다음사진.jpg'])transfer.items.add(new File([new Uint8Array(bytes)],name,{type:'image/jpeg'}));return transfer;},images[0]);
  await otherPage.locator('#uploadDrop').dispatchEvent('drop',{dataTransfer:droppedPhotos});await droppedPhotos.dispose();await otherPage.waitForFunction(()=>document.querySelectorAll('#photos [data-id]').length===2);await otherPage.waitForFunction(()=>document.querySelector('#notice').textContent.includes('업로드 완료'));assert.equal(await otherPage.locator('#upload').isEnabled(),true);await otherPage.evaluate(()=>fetch('/api/jobs/'+job.id+'/finish',{method:'POST'}));await other.close();
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'Mobile horizontal overflow');await page.setViewportSize({width:320,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'Narrow mobile horizontal overflow');await page.setViewportSize({width:390,height:844});await mkdir('/workspace/substation-qa',{recursive:true});await page.locator('#photos article').first().scrollIntoViewIfNeeded();await page.screenshot({path:'/workspace/substation-qa/audit-e2e-mobile.png'});
- await page.locator('#logout').click();await page.locator('#login').waitFor({state:'visible'});await page.locator('#password').fill('test-only-password');await page.locator('#loginForm button').click();await page.locator('#jobs button').first().click();await page.locator('#finish').waitFor({state:'visible'});page.on('dialog',d=>d.accept());await page.locator('#finish').click();await page.locator('#editor').waitFor({state:'hidden'});assert.equal([...b.objects.keys()].filter(k=>!k.startsWith('reference/')).length,0);assert.equal([...b.objects.keys()].filter(k=>k.startsWith('reference/')).length,1);assert.equal(b.externalCalls.length,0);assert.deepEqual(errors,[]);console.log('PASS E2E: mobile login, Korean ZIP, corrupt/duplicate handling, PMA gate, project snapshot, partial generation recovery, ZIP bytes/EXIF, device isolation, logout recovery, confirmed deletion. No paid AI calls.');
+ await page.locator('#logout').click();await page.locator('#login').waitFor({state:'visible'});await page.locator('#password').fill('test-only-password');await page.locator('#loginForm button').click();await page.locator('#jobs button').first().click();await page.locator('#finish').waitFor({state:'visible'});page.on('dialog',d=>d.accept());await page.locator('#finish').click();await page.locator('#editor').waitFor({state:'hidden'});assert.equal([...b.objects.keys()].filter(k=>!k.startsWith('reference/')).length,0);assert.equal([...b.objects.keys()].filter(k=>k.startsWith('reference/')).length,1);assert.equal(b.externalCalls.length,0);assert.deepEqual(errors,[]);// Upload alone starts AI, fills a suggestion, and persists it without confirming.
+ b.env.AI_ENABLED='true';b.env.OPENAI_API_KEY='test-only-ai-key';
+ const aiContext=await browser.newContext();try {
+ const aiPage=await aiContext.newPage();aiPage.on('pageerror',e=>errors.push(e.message));await login(aiPage);
+ assert.match(await aiPage.title(),/신우 보드판/);
+ await aiPage.locator('#upload').setInputFiles({name:'시험사진.jpg',mimeType:'image/jpeg',buffer:Buffer.from(images[0])});
+ await aiPage.waitForFunction(()=>document.querySelector('#notice').textContent.includes('AI 분석 완료'));
+ await aiPage.waitForFunction(()=>document.querySelector('#upload').disabled===false);
+ assert.equal(b.externalCalls.length,1);
+ assert.equal(await aiPage.locator('[data-key="work"]').inputValue(),'동작특성 시험');
+ assert.match(await aiPage.locator('[data-recommendations]').textContent(),/동작특성 시험/);
+ const saved=await aiPage.evaluate(async()=>await(await fetch('/api/jobs/'+job.id)).json());
+ assert.equal(saved.photos[0].work,'동작특성 시험');assert.equal(saved.photos[0].confirmed,false);
+ assert.equal(saved.photos[0].analysisStatus,'complete');
+ await aiPage.reload();await aiPage.locator('#jobs button').first().click();
+ assert.equal(await aiPage.locator('[data-key="work"]').inputValue(),'동작특성 시험');assert.equal(b.externalCalls.length,1);
+ assert.deepEqual(errors,[]);
+ } finally {await aiContext.close();}
+ console.log('PASS E2E: mobile login, Korean ZIP, corrupt/duplicate handling, PMA gate, project snapshot, partial generation recovery, ZIP bytes/EXIF, device isolation, logout recovery, confirmed deletion. No paid AI calls.');
 }finally{await context?.close();await browser.close();await new Promise(r=>server.close(r));await b.db.close();}

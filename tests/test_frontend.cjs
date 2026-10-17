@@ -52,3 +52,17 @@ test('older job save response cannot replace the newly opened job', async () => 
   complete({revision:2,state:'uploaded',photos:[]});await pending;
   assert.equal(evaluate('job.id'),'new-job');assert.equal(evaluate('job.revision'),7);
 });
+test('recommendations fill only blank ordinary work and never confirm ambiguity or overwrite edits', async () => {
+ const {evaluate}=harness();
+ evaluate(`settings.ambiguityGroups=[{id:'pma',equipmentMatch:'PMA',required:true,options:['코일 저항 측정','PMA 전압 측정']}];
+ job.photos=[
+ {id:'a',work:'',equipmentType:'GIS',analysisStatus:'complete',recommendation:{result:{candidates:[{work:'동작특성 시험'}]}}},
+ {id:'b',work:'',equipmentType:'PMA GIS',analysisStatus:'complete',recommendation:{result:{candidates:[{work:'코일 저항 측정'}]}}},
+ {id:'c',work:'직접 수정',equipmentType:'GIS',analysisStatus:'complete',recommendation:{result:{candidates:[{work:'점검'}]}}}];
+ browserEngine={analyse:async value=>value};flush=async()=>{};update=()=>{};`);
+ await evaluate('analyseCurrent()');
+ assert.equal(evaluate('job.photos[0].work'),'동작특성 시험');
+ assert.equal(evaluate('!!job.photos[0].confirmed'),false);
+ assert.equal(evaluate('job.photos[1].work'),'');
+ assert.equal(evaluate('job.photos[2].work'),'직접 수정');
+});

@@ -80,7 +80,7 @@ async function uploadSelectedFiles(files) {
   if(busy){notice('현재 작업이 끝난 뒤 파일을 추가해 주세요.');return;}busy=true;update();
   try {
     await flush();
-    if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles(files,api,notice)); await list(); notice('업로드 완료. 서버에 작업용 사본과 진행 상태를 저장했습니다.'); } finally { busy = false; update(); } return; }
+    if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles(files,api,notice)); await list(); notice('업로드 완료. 서버에 작업용 사본과 진행 상태를 저장했습니다.'); if(settings.aiConfigured) await analyseCurrent(); else notice('업로드 완료 · AI가 연결되지 않아 직접 입력이 필요합니다.'); } finally { busy = false; update(); } return; }
     for (const file of files) {
       notice(`${file.name} 업로드 및 폴더 분석 중…`);
       const r = await fetch('/api/upload', {method:'POST', headers:{'X-Filename':encodeURIComponent(file.name)}, body:file});
@@ -195,6 +195,7 @@ function update() {
   for (const card of document.querySelectorAll('[data-id]')) {
     const photo = job.photos.find(p => p.id === card.dataset.id);
     const ready = job.state === 'ready' && !photo.excluded;
+    const workInput=card.querySelector('[data-key="work"]');if(document.activeElement!==workInput)workInput.value=photo.work||'';
     const typeInput=card.querySelector('[data-key="equipmentType"]');if(document.activeElement!==typeInput)typeInput.value=photo.equipmentType||'';
     card.querySelector('[data-key="measurementScene"]').checked=!!photo.measurementScene;
     const confirmButton=card.querySelector('[data-confirm]');
@@ -272,7 +273,22 @@ $('#applyBatch').onclick = run(async () => exclusive(async () => {
   }
   markDirty(); await flush(); open(job);
 }));
-$('#analyse').onclick = run(async () => exclusive(async () => { if(browserEngine) { job=await browserEngine.analyse(job,api,(current,message)=>{job=current;update();if(message)notice(message);}); } else job = await api(`/api/jobs/${job.id}/analyse`, {}); update(); if (['analysis_queued','analysing'].includes(job.state)) schedulePoll(); }));
+async function analyseCurrent() {
+  if(browserEngine) {
+    job=await browserEngine.analyse(job,api,(current,message)=>{job=current;update();if(message)notice(message);});
+    let changed=false;
+    for(const photo of job.photos) {
+      const result=photo.analysisStatus==='complete' && photo.recommendation?.result;
+      if(!photo.excluded && !photo.confirmed && !photo.work?.trim() && result?.candidates?.length && !groupFor(photo)) {
+        photo.work=result.candidates[0].work;changed=true;
+      }
+    }
+    if(changed){markDirty();await flush();}
+  } else job=await api(`/api/jobs/${job.id}/analyse`,{});
+  update();
+  if(['analysis_queued','analysing'].includes(job.state))schedulePoll();
+}
+$('#analyse').onclick = run(async () => exclusive(analyseCurrent));
 $('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (browserEngine) await browserGenerate(); else if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
 $('#finish').onclick = run(async () => {
   if (!confirm('ZIP을 휴대폰 또는 PC에 저장했나요? 서버 사진과 결과물을 영구 삭제합니다.')) return;
