@@ -10,6 +10,17 @@ try{
  const result=await page.evaluate(async()=>{
   const engine=await import('/browser-engine.mjs');const c=document.createElement('canvas');c.width=1200;c.height=1600;const ctx=c.getContext('2d');ctx.fillStyle='#78909c';ctx.fillRect(0,0,c.width,c.height);const raw=await new Promise(r=>c.toBlob(r,'image/jpeg',.92));
   const analysis=await engine.prepareAnalysis(raw,{rotation:0});const maskedImage=await createImageBitmap(analysis.blob);const maskCanvas=document.createElement('canvas');maskCanvas.width=maskedImage.width;maskCanvas.height=maskedImage.height;const maskCtx=maskCanvas.getContext('2d');maskCtx.drawImage(maskedImage,0,0);const gray=[...maskCtx.getImageData(maskedImage.width-10,10,1,1).data];if(analysis.values.length!==64||analysis.values.some(v=>!Number.isFinite(v)))throw Error('Invalid visual features');
+  // Actual browser queue: target equipment first, skip confirmed/excluded,
+  // continue a per-photo failure, and stop immediately on provider quota errors.
+  const fetchBeforeAnalysis=window.fetch,order=[],messages=[];
+  let queued={id:'queue',photos:[{id:'work',path:'folder/작업.jpg',rotation:0},{id:'target',path:'folder/대상기기.jpg',rotation:0},{id:'excluded',path:'folder/제외.jpg',excluded:true},{id:'confirmed',path:'folder/확정.jpg',confirmed:true}]};
+  try{
+   window.fetch=async(url)=>{if(url.includes('/image/'))return new Response(raw);const id=url.split('/').at(-1);order.push(id);if(id==='work')return Response.json({error:'사진 분석 실패'},{status:502});return Response.json({...queued,photos:queued.photos.map(p=>p.id===id?{...p,analysisStatus:'complete'}:p)});};
+   queued=await engine.analyse(queued,null,(job,message)=>{if(message)messages.push(message);});
+   if(order.join(',')!=='target,work'||queued.photos[0].analysisStatus!=='failed'||!messages.at(-1).includes('실패 1장'))throw Error('AI queue order/failure handling');
+   let quotaCalls=0;window.fetch=async(url)=>url.includes('/image/')?new Response(raw):(quotaCalls++,Response.json({error:'호출 한도'},{status:429}));
+   let quotaStopped=false;try{await engine.analyse(queued,null,()=>{});}catch(e){quotaStopped=e.status===429;}if(!quotaStopped||quotaCalls!==1)throw Error('AI quota did not stop queue');
+  }finally{window.fetch=fetchBeforeAnalysis;}
   const rawBytes=new Uint8Array(await raw.arrayBuffer());const exif=new Uint8Array([69,120,105,102,0,0,73,73,42,0,8,0,0,0,1,0,18,1,3,0,1,0,0,0,6,0,0,0,0,0,0,0]);const exifBlob=new Blob([rawBytes.slice(0,2),new Uint8Array([255,225,0,34]),exif,rawBytes.slice(2)],{type:'image/jpeg'});const exifPrepared=await engine.prepareSource(exifBlob);if(exifPrepared.width!==1280||exifPrepared.height!==960)throw Error('EXIF orientation not applied');
   const prepared=await engine.prepareSource(raw);const photo={id:'a'.repeat(24),path:'2026-10-16/남시화/측정.jpg',location:'남시화 변전소',equipment:'154kV GIS PMA',work:'코일 저항 측정',date:'2026-10-16',rotation:0,excluded:false};
   const output=await engine.renderPhoto(prepared.blob,photo,'2026~2026년도 시흥전력지사 변전협력회사 총액공사');const image=await createImageBitmap(output);const inspect=document.createElement('canvas');inspect.width=image.width;inspect.height=image.height;const p=inspect.getContext('2d');p.drawImage(image,0,0);const edge=[...p.getImageData(image.width-1,image.height-1,1,1).data];

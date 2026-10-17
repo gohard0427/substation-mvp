@@ -1,5 +1,5 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
-import {backend} from './helpers/free-backend.mjs';import {nearest,validateResult,analysisFingerprint} from '../cloudflare/vision.mjs';
+import {backend} from './helpers/free-backend.mjs';import {nearest,validateResult,analysisFingerprint,equipmentContext,recommend,DEFAULT_VISION_MODEL,checkVisionConnection} from '../cloudflare/vision.mjs';
 const result={equipmentType:'PMA GIS',candidates:[{work:'코일 저항 측정',reason:'측정 장면'}],observations:['조작부에 계측기를 연결함'],measurementScene:true,ambiguityGroupId:null,needsUserReview:false};
 const b=await backend({visionResult:result});test.after(()=>b.db.close());
 const jpeg=(w=960,h=720)=>new Uint8Array([255,216,255,192,0,17,8,h>>8,h&255,w>>8,w&255,3,1,17,0,2,17,0,3,17,0,255,217]);
@@ -35,4 +35,36 @@ test('disabled AI makes no external call; enabled per-photo analysis is cached a
 });
 test('cache signature changes with rotation and reviewed examples',async()=>{
  const cfg=await b.rpc('config_get'),p={hash:'x',rotation:0,equipmentType:'GIS'};const a=await analysisFingerprint(p,cfg,[reference],'test');assert.notEqual(a,await analysisFingerprint({...p,rotation:1},cfg,[reference],'test'));assert.notEqual(a,await analysisFingerprint(p,cfg,[{...reference,updated_at:'changed'}],'test'));
+});
+
+test('zero reviewed references still allows image analysis and lifetime cap survives a new day',async()=>{
+ const isolated=await backend({visionResult:result});try{
+ isolated.env.AI_ENABLED='true';isolated.env.OPENAI_API_KEY='test-only-ai-key';isolated.env.AI_TOTAL_LIMIT='1';
+ const c=isolated.client();await c.login();let job=await(await c.request('/api/jobs',{})).json();const id='2'.repeat(24);
+ job=await(await c.request(`/api/jobs/${job.id}/source/${id}`,jpeg(),{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:'folder/photo.jpg',hash:'c'.repeat(64)})),'X-Revision':String(job.revision)})).json();
+ const request=()=>c.request(`/api/jobs/${job.id}/analyse/${id}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});
+ let response=await request();assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(isolated.externalCalls.length,1);assert.equal(isolated.externalCalls[0].model,DEFAULT_VISION_MODEL);assert.equal(isolated.externalCalls[0].max_output_tokens,3000);assert.equal(isolated.externalCalls[0].reasoning.effort,'none');assert.equal(job.photos[0].confirmed,false);
+ // Cache continues to work at the total cap.
+ response=await request();assert.equal(response.status,200);job=await response.json();assert.equal(isolated.externalCalls.length,1);
+ await isolated.db.exec("update np_ai_runs set created_at=now()-interval '25 hours'");
+ job.photos[0].rotation=1;job=await(await c.request(`/api/jobs/${job.id}/save`,{revision:job.revision,photos:job.photos})).json();
+ response=await request();assert.equal(response.status,429);assert.match((await response.json()).error,/전체 시험/);assert.equal(isolated.externalCalls.length,1);
+ }finally{await isolated.db.close();}
+});
+test('only same-folder target equipment contributes context; it invalidates cached recommendations',async()=>{
+ const target={id:'target',group:'folder/a',equipment:'GIS',equipmentType:'PMA GIS',analysisStatus:'complete',recommendation:{result:{candidates:[{work:'대상 기기'}],observations:['PMA 표기']}}};
+ const photo={id:'work',group:'folder/a',hash:'h',rotation:0,equipmentType:''};
+ assert.deepEqual(equipmentContext({photos:[{...target,group:'folder/b'}]},photo),[]);
+ assert.deepEqual(equipmentContext({photos:[{...target,excluded:true}]},photo),[]);
+ const context=equipmentContext({photos:[target,photo]},photo);assert.equal(context.length,1);assert.equal(context[0].source,'ai-inferred');
+ const cfg=await b.rpc('config_get');assert.notEqual(await analysisFingerprint(photo,cfg,[],DEFAULT_VISION_MODEL),await analysisFingerprint(photo,cfg,[],DEFAULT_VISION_MODEL,context));
+});
+test('provider quota error is actionable and has no automatic paid retry',async()=>{
+ let calls=0;const cfg=await b.rpc('config_get');await assert.rejects(recommend({env:{OPENAI_API_KEY:'test'},image:jpeg(),photo:{},works:cfg.workTypes,groups:cfg.ambiguityGroups,references:[],context:[],fetcher:async()=>{calls++;return new Response(null,{status:429});}}),e=>e.status===429);assert.equal(calls,1);
+});
+
+test('admin connection probe sends no photos and performs no billable inference',async()=>{
+ let calls=0;const value=await checkVisionConnection({OPENAI_API_KEY:'test-only-key'},async(url,options)=>{calls++;assert.ok(url.endsWith('/models/'+DEFAULT_VISION_MODEL));assert.equal(options.body,undefined);return Response.json({id:DEFAULT_VISION_MODEL});});assert.equal(value.keyVerified,true);assert.equal(value.analysisEnabled,false);assert.equal(calls,1);
+ await assert.rejects(checkVisionConnection({},()=>{throw Error('must not call');}),/Secret/);
+ const worker=b.client();await worker.login();assert.equal((await worker.request('/api/ai-status')).status,403);
 });

@@ -32,6 +32,7 @@ function resolved(photo, group = groupFor(photo)) {
 function statusFor(photo) {
   if (photo.excluded) return '제외';
   if (photo.generationError) return '생성 실패';
+  if (photo.analysisStatus === 'failed' && !photo.confirmed) return '분석 실패';
   if (['date','location','equipment','work'].some(k => !photo[k]?.trim())) return '정보 누락';
   if (!resolved(photo)) return '사용자 선택 필요';
   return photo.confirmed ? '확인 완료' : '확인 대기';
@@ -46,7 +47,7 @@ async function boot() {
   $('#extraProjects').value = (settings.projects||[]).filter(v=>v!==settings.project).join('\n');
   $('#workTypes').value = settings.workTypes.join('\n');
   $('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join('');
-  $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
+  $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회 · 전체 시험 최대 ${settings.aiTotalLimit||100}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
   $('#login').hidden = true;$('#logout').hidden=!browserEngine;$('#project').readOnly=!!browserEngine;$('#extraProjects').closest('label').hidden=!browserEngine;$('#jobProjectPanel').hidden=!browserEngine;$('#referenceAdminPanel').hidden=!browserEngine;
   $('#workspace').hidden = false;
   $('#admin').hidden = settings.role !== 'admin';
@@ -70,6 +71,7 @@ $('#loginForm').onsubmit = async event => {
   try { await api('/api/login', {role:$('#role').value, password:$('#password').value}); $('#password').value = ''; await boot(); notice('로그인되었습니다.', 1500); }
   catch (error) { notice(error.message); }
 };
+$('#checkAi').onclick = run(async()=>{ const button=$('#checkAi');button.disabled=true;try{const result=await api('/api/ai-status');$('#aiStatus').textContent=result.message+(result.analysisEnabled?'':' AI_ENABLED=true 설정과 재배포가 필요합니다.');}finally{button.disabled=false;} });
 $('#restore').onclick = run(async () => { if (!blocked) await flush(); await list(); notice('저장된 작업을 선택하세요. 충돌이 있었다면 다시 불러온 내용이 적용됩니다.'); });
 $('#saveSettings').onclick = run(async () => {if(!browserEngine){await api('/api/settings',{project:$('#project').value});settings.project=$('#project').value;notice('공사명을 저장했습니다.');return;} const saved=await api('/api/settings', {project:$('#project').value,extraProjects:$('#extraProjects').value.split('\n').map(v=>v.trim()).filter(Boolean)});settings.project=saved.project||settings.project;settings.projects=saved.projects||[settings.project];if(job)renderJobProject();notice('기본 공사명과 추가 공사명 목록을 저장했습니다.'); });
 $('#revoke').onclick = run(async () => { if (confirm('모든 기기의 로그인 세션을 종료할까요?')) { await flush(); await api('/api/revoke', {}); location.reload(); } });
@@ -176,6 +178,8 @@ function update() {
   for (const card of document.querySelectorAll('[data-id]')) {
     const photo = job.photos.find(p => p.id === card.dataset.id);
     const ready = job.state === 'ready' && !photo.excluded;
+    const typeInput=card.querySelector('[data-key="equipmentType"]');if(document.activeElement!==typeInput)typeInput.value=photo.equipmentType||'';
+    card.querySelector('[data-key="measurementScene"]').checked=!!photo.measurementScene;
     const confirmButton=card.querySelector('[data-confirm]');
     confirmButton.textContent=photo.confirmed?'확정 완료 · 취소':'내용 확정'; confirmButton.setAttribute('aria-pressed',String(!!photo.confirmed)); confirmButton.disabled=locked||blocked||job.state==='deleting'||photo.excluded;
     const excludeButton=card.querySelector('[data-exclude]'); excludeButton.textContent=photo.excluded?'결과물에 다시 포함':'이번 결과물에서 제외'; excludeButton.disabled=locked||blocked||job.state==='deleting';
@@ -250,7 +254,7 @@ $('#applyBatch').onclick = run(async () => exclusive(async () => {
   }
   markDirty(); await flush(); open(job);
 }));
-$('#analyse').onclick = run(async () => exclusive(async () => { if(browserEngine) { job=await browserEngine.analyse(job,api,current=>{job=current;update();}); } else job = await api(`/api/jobs/${job.id}/analyse`, {}); update(); if (['analysis_queued','analysing'].includes(job.state)) schedulePoll(); }));
+$('#analyse').onclick = run(async () => exclusive(async () => { if(browserEngine) { job=await browserEngine.analyse(job,api,(current,message)=>{job=current;update();if(message)notice(message);}); } else job = await api(`/api/jobs/${job.id}/analyse`, {}); update(); if (['analysis_queued','analysing'].includes(job.state)) schedulePoll(); }));
 $('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (browserEngine) await browserGenerate(); else if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
 $('#finish').onclick = run(async () => {
   if (!confirm('ZIP을 휴대폰 또는 PC에 저장했나요? 서버 사진과 결과물을 영구 삭제합니다.')) return;

@@ -2,7 +2,7 @@ import {checkZipDirectory,zipEntryPath} from '../shared/zip-safety.mjs';
 import {ZipReader,ZipWriter,BlobReader,BlobWriter} from '@zip.js/zip.js';
 import {LIMITS,PROFILE,safePath,hash,outputPaths,validateImage} from '../shared/free-model.mjs';
 const placeholder='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="640" height="480"%3E%3Crect width="100%25" height="100%25" fill="%23e9eeea"/%3E%3C/svg%3E';
-async function checked(response){if(!response.ok){let value={};try{value=await response.json();}catch{}throw Error(value.error||'사진 처리 요청이 실패했습니다.');}return response;}
+async function checked(response){if(!response.ok){let value={};try{value=await response.json();}catch{}const error=Error(value.error||'사진 처리 요청이 실패했습니다.');error.status=response.status;throw error;}return response;}
 function canvas(width,height){const el=document.createElement('canvas');el.width=width;el.height=height;return el;}
 function jpeg(canvas,quality=.85){return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(Error('JPEG 변환에 실패했습니다.')),'image/jpeg',quality));}
 async function bitmap(blob){const image=await createImageBitmap(blob,{imageOrientation:'from-image'});if(image.width*image.height>LIMITS.pixels){image.close();throw Error('사진은 최대 2천만 픽셀입니다.');}return image;}
@@ -148,10 +148,15 @@ export async function prepareAnalysis(blob,photo,mask={x:.44,y:.75}){
 export async function analyse(job,api,progress){
  previewsPaused=true;await activePreview;
  try{
-  for(const p of job.photos.filter(p=>!p.excluded&&!p.confirmed)){
+  const pending=job.photos.filter(p=>!p.excluded&&!p.confirmed).sort((a,b)=>Number(/대상[ _]?기기/.test(b.path)||b.work==='대상 기기')-Number(/대상[ _]?기기/.test(a.path)||a.work==='대상 기기'));
+  let done=0;const failures=new Map();
+  for(const p of pending){
+   progress(job,`AI 분석 중 ${done+1}/${pending.length}`);
+   try{
    const photo=job.photos.find(v=>v.id===p.id);const source=await (await checked(await fetch(`/api/jobs/${job.id}/image/${photo.id}`))).blob();const analysis=await prepareAnalysis(source,photo);
-   const response=await checked(await fetch(`/api/jobs/${job.id}/analyse/${photo.id}`,{method:'POST',headers:{'X-Visual-Signature':JSON.stringify(analysis.values)},body:analysis.blob}));job=await response.json();progress(job);
-  }return job;
+   const response=await checked(await fetch(`/api/jobs/${job.id}/analyse/${photo.id}`,{method:'POST',headers:{'X-Visual-Signature':JSON.stringify(analysis.values)},body:analysis.blob}));job=await response.json();for(const [id,message] of failures){const failed=job.photos.find(v=>v.id===id);if(failed){failed.analysisStatus='failed';failed.analysisError=message;}}done++;progress(job);
+   }catch(error){if([401,403,409,429,503].includes(error.status))throw error;failures.set(p.id,error.message);const failed=job.photos.find(v=>v.id===p.id);failed.analysisStatus='failed';failed.analysisError=error.message;progress(job);}
+  }progress(job,failures.size?`AI 분석 완료 · 실패 ${failures.size}장. 다시 요청하면 미완료 사진만 재시도합니다.`:`AI 분석 완료 · ${done}장. 사진별 후보를 확인하고 내용을 확정하세요.`);return job;
  }finally{previewsPaused=false;drainPreviews();}
 }
 export async function referencePlatePreview(blob,mask){

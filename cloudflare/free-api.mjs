@@ -1,4 +1,5 @@
-import {referenceRoute,analysePhoto,aiConfigured,dailyLimit} from './reference-api.mjs';
+import {visionModel} from './vision.mjs';
+import {referenceRoute,analysePhoto,aiConfigured,dailyLimit,totalLimit} from './reference-api.mjs';
 import {SupabaseClient,AppError} from './supabase-client.mjs';
 import {BUCKET,storageDelete} from '../supabase/functions/_shared/cleanup.mjs';
 import {DEFAULT_PROJECT,ValidationError,LIMITS,PROFILE,hash,fingerprint,safePath,infer,safePhotoUpdate,validateImage,validateConfirmed,normalized} from '../shared/free-model.mjs';
@@ -64,7 +65,7 @@ export async function freeGateway(request,env,fetcher=fetch){
   const cfg=await client.rpc('config_get');
   if(['/api/work-types','/api/ambiguity-groups','/api/revoke','/api/worker-password'].includes(path)&&request.method!=='POST')throw new AppError('POST 요청만 허용됩니다.',405);
   if(path==='/api/settings'){
-   if(request.method==='GET')return json({project:DEFAULT_PROJECT,projects:[DEFAULT_PROJECT,...(cfg.extraProjects||[])],workTypes:cfg.workTypes,ambiguityGroups:cfg.ambiguityGroups,role:session.role,processingMode:'browser',aiConfigured:aiConfigured(env),aiModel:env.OPENAI_VISION_MODEL||'gpt-4.1-mini',aiDailyLimit:dailyLimit(env),storageBytes:cfg.storageBytes,storageLimit:cfg.storageLimit,limits:LIMITS});
+   if(request.method==='GET')return json({project:DEFAULT_PROJECT,projects:[DEFAULT_PROJECT,...(cfg.extraProjects||[])],workTypes:cfg.workTypes,ambiguityGroups:cfg.ambiguityGroups,role:session.role,processingMode:'browser',aiConfigured:aiConfigured(env),aiModel:visionModel(env),aiDailyLimit:dailyLimit(env),aiTotalLimit:totalLimit(env),storageBytes:cfg.storageBytes,storageLimit:cfg.storageLimit,limits:LIMITS});
    admin();const value=await readJson(request);const projects=value.extraProjects??cfg.extraProjects??[];if(!Array.isArray(projects)||projects.length>30||projects.some(v=>typeof v!=='string'||!v.trim()||v.length>150||/[\x00-\x1f]/.test(v)))throw new AppError('추가 공사명은 한 줄에 하나씩, 최대 30개를 입력하세요.');const extraProjects=[...new Set(projects.map(v=>v.trim()).filter(v=>v!==DEFAULT_PROJECT))];await client.rpc('config_set',{project:DEFAULT_PROJECT,extraProjects});return json({project:DEFAULT_PROJECT,projects:[DEFAULT_PROJECT,...extraProjects]});
   }
   if(path==='/api/work-types'){admin();const {workTypes}=await readJson(request);if(!Array.isArray(workTypes)||!workTypes.length||workTypes.length>500||workTypes.some(v=>typeof v!=='string'||!v.trim()||v.length>100||/[\x00-\x1f]/.test(v))||new Set(workTypes.map(normalized)).size!==workTypes.length)throw new AppError('중복 없이 작업명을 1~500개 입력하세요.');await client.rpc('config_set',{workTypes});return json({workTypes});}
@@ -72,7 +73,7 @@ export async function freeGateway(request,env,fetcher=fetch){
   if(path==='/api/revoke'){admin();await client.rpc('sessions_revoke',{all:true});return json({ok:true});}
   if(path==='/api/worker-password'){admin();const {password}=await readJson(request);if(typeof password!=='string'||password.length<12||password.length>128)throw new AppError('비밀번호는 12~128자로 입력하세요.');await client.request(`/auth/v1/admin/users/${env.WORKER_USER_ID}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});await client.rpc('sessions_revoke',{all:false});return json({ok:true});}
   if(path==='/api/maintenance'&&request.method==='GET'){admin();return json(await client.maintenanceRpc('status'));}
-  if(path.startsWith('/api/references')||path==='/api/ai-usage')return await referenceRoute({path,request,client,admin,readJson,body,json});
+  if(path.startsWith('/api/references')||path==='/api/ai-usage'||path==='/api/ai-status')return await referenceRoute({path,request,client,admin,readJson,body,json,env,fetcher});
   if(path==='/api/jobs'){
    if(request.method==='GET')return json(await client.rpc('jobs_list',{deviceHash:await hash(jar.np_device)}));
    const id=crypto.randomUUID(),args=await access(jar.np_device,id);return json(clientJob(await client.rpc('job_create',args)));
