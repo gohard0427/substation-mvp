@@ -10,3 +10,5 @@ label.check{display:flex;gap:8px;align-items:center}label.check input{width:auto
 .photo-options,.photo-menu{margin:12px 0;font-size:12px;color:#64746f}.photo-options{padding:10px 0;border-block:1px solid #e5ebe7}[data-confirm][aria-pressed="true"]{background:#e6eee9;color:#175b4a}
 
 .photo-rotation{margin:8px 0;font-size:11px;color:#64746f}.photo-rotation summary{font-weight:400}.photo-rotation label{font-size:11px}
+
+.drop.drag-over{border:2px solid #175b4a;background:#e1f0e7;box-shadow:0 0 0 3px #175b4a18}

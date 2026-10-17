@@ -75,20 +75,37 @@ $('#checkAi').onclick = run(async()=>{ const button=$('#checkAi');button.disable
 $('#restore').onclick = run(async () => { if (!blocked) await flush(); await list(); notice('저장된 작업을 선택하세요. 충돌이 있었다면 다시 불러온 내용이 적용됩니다.'); });
 $('#saveSettings').onclick = run(async () => {if(!browserEngine){await api('/api/settings',{project:$('#project').value});settings.project=$('#project').value;notice('공사명을 저장했습니다.');return;} const saved=await api('/api/settings', {project:$('#project').value,extraProjects:$('#extraProjects').value.split('\n').map(v=>v.trim()).filter(Boolean)});settings.project=saved.project||settings.project;settings.projects=saved.projects||[settings.project];if(job)renderJobProject();notice('기본 공사명과 추가 공사명 목록을 저장했습니다.'); });
 $('#revoke').onclick = run(async () => { if (confirm('모든 기기의 로그인 세션을 종료할까요?')) { await flush(); await api('/api/revoke', {}); location.reload(); } });
-$('#upload').onchange = async event => {
-  if(busy){event.target.value='';return;}busy=true;update();
+async function uploadSelectedFiles(files) {
+  files=Array.from(files||[]);if(!files.length)return;
+  if(busy){notice('현재 작업이 끝난 뒤 파일을 추가해 주세요.');return;}busy=true;update();
   try {
     await flush();
-    if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles([...event.target.files],api,notice)); await list(); notice('업로드 완료. 서버에 작업용 사본과 진행 상태를 저장했습니다.'); } finally { busy = false; update(); } return; }
-    for (const file of event.target.files) {
+    if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles(files,api,notice)); await list(); notice('업로드 완료. 서버에 작업용 사본과 진행 상태를 저장했습니다.'); } finally { busy = false; update(); } return; }
+    for (const file of files) {
       notice(`${file.name} 업로드 및 폴더 분석 중…`);
       const r = await fetch('/api/upload', {method:'POST', headers:{'X-Filename':encodeURIComponent(file.name)}, body:file});
       const value = await r.json(); if (!r.ok) throw Error(value.error); open(value);
     }
     await list(); notice('업로드 완료. 사진별 정보를 검토하세요.');
   } catch (error) { notice(error.message); }
-  finally { busy=false;update();event.target.value = ''; }
+  finally { busy=false;update();$('#upload').value = ''; }
+}
+$('#upload').onchange = event => uploadSelectedFiles(event.target.files);
+const dropZone=$('#uploadDrop');
+const fileDrag=event=>Array.from(event.dataTransfer?.types||[]).includes('Files');
+dropZone.ondragenter=dropZone.ondragover=event=>{
+  if(!fileDrag(event))return;event.preventDefault();
+  event.dataTransfer.dropEffect=busy?'none':'copy';
+  if(!busy)dropZone.classList.add('drag-over');
 };
+dropZone.ondragleave=event=>{if(!dropZone.contains(event.relatedTarget))dropZone.classList.remove('drag-over');};
+dropZone.ondrop=event=>{
+  if(!fileDrag(event))return;event.preventDefault();event.stopPropagation();dropZone.classList.remove('drag-over');
+  if(Array.from(event.dataTransfer.items||[]).some(item=>item.webkitGetAsEntry?.()?.isDirectory)){notice('폴더는 ZIP으로 압축해서 올려 주세요.');return;}
+  return uploadSelectedFiles(event.dataTransfer.files);
+};
+window.addEventListener('dragover',event=>{if(fileDrag(event))event.preventDefault();});
+window.addEventListener('drop',event=>{if(fileDrag(event)){event.preventDefault();dropZone.classList.remove('drag-over');notice('사진·ZIP 업로드 영역에 파일을 놓아 주세요.');}});
 function open(value) {
   clearTimeout(autosave); clearTimeout(poll); browserEngine?.clearPreviews();
   job = value; editEpoch = savedEpoch = 0; blocked = false;
