@@ -4,7 +4,12 @@ const normalized = value => String(value || '').replace(/\s+/g, '').toLowerCase(
 const stateNames = {uploaded:'확인 중', analysis_queued:'AI 분석 대기', analysing:'AI 분석 중', queued:'생성 대기 중', generating:'명판 생성 중', ready:'다운로드 가능', failed:'생성 실패', deleting:'사진 삭제 중'};
 let job, settings, poll, autosave, browserEngine, stopRequested = false, busy = false, blocked = false;
 let editEpoch = 0, savedEpoch = 0, queue = Promise.resolve();
-function notice(message) { $('#notice').textContent = message; }
+let noticeTimer;
+function notice(message, duration = 0) {
+  clearTimeout(noticeTimer);
+  $('#notice').textContent = message;
+  if (duration) noticeTimer = setTimeout(() => { $('#notice').textContent = ''; }, duration);
+}
 async function api(path, data) {
   const r = await fetch(path, {method:data === undefined ? 'GET' : 'POST', headers:data === undefined ? {} : {'Content-Type':'application/json'}, body:data === undefined ? undefined : JSON.stringify(data)});
   const value = await r.json();
@@ -62,7 +67,7 @@ async function list() {
 }
 $('#loginForm').onsubmit = async event => {
   event.preventDefault();
-  try { await api('/api/login', {role:$('#role').value, password:$('#password').value}); $('#password').value = ''; await boot(); notice('로그인되었습니다.'); }
+  try { await api('/api/login', {role:$('#role').value, password:$('#password').value}); $('#password').value = ''; await boot(); notice('로그인되었습니다.', 1500); }
   catch (error) { notice(error.message); }
 };
 $('#restore').onclick = run(async () => { if (!blocked) await flush(); await list(); notice('저장된 작업을 선택하세요. 충돌이 있었다면 다시 불러온 내용이 적용됩니다.'); });
