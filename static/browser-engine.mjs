@@ -135,9 +135,30 @@ export async function downloadZip(job,entries,progress){
 }
 export function saveBlob(blob,name){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 
-export async function prepareAnalysis(blob,photo,mask={x:.44,y:.75}){
+function detectedPlateMask(image){
+ const width=image.width,height=image.height,small=canvas(width,height),ctx=small.getContext('2d',{willReadFrequently:true});
+ try{
+  ctx.drawImage(image,0,0);const pixels=ctx.getImageData(0,0,width,height).data;
+  const brightness=(x,y)=>{const i=(Math.max(0,Math.min(height-1,y))*width+Math.max(0,Math.min(width-1,x)))*4;return(pixels[i]+pixels[i+1]+pixels[i+2])/3;};
+  // Only the two nameplate profiles measured from the supplied examples.
+  const profiles=[{x:1137/2048,y:1200/1536},{x:676/1440,y:878/1080}];
+  let best=null;
+  for(const profile of profiles){
+   const left=Math.ceil(profile.x*width)+3;let white=0,total=0,lines=0;
+   for(let y=Math.ceil(profile.y*height)+2;y<height-2;y++)for(let x=left;x<width-3;x++){white+=brightness(x,y)>225;total++;}
+   for(let row=1;row<5;row++){
+    const center=Math.round((profile.y+(1-profile.y)*row/5)*height);let strongest=0;
+    for(let y=center-2;y<=center+2;y++){let dark=0,count=0;for(let x=left;x<width-3;x++){dark+=brightness(x,y)<235;count++;}strongest=Math.max(strongest,dark/count);}
+    if(strongest>.7)lines++;
+   }
+   const score=lines+white/Math.max(1,total);if(lines>=3&&white/Math.max(1,total)>.65&&(!best||score>best.score))best={...profile,score};
+  }
+  return best||{x:.44,y:.75};
+ }finally{small.width=small.height=0;}
+}
+export async function prepareAnalysis(blob,photo,mask){
  // Mask before rotation so a manual turn cannot move an old answer outside the mask.
- const image=await bitmap(blob),scale=Math.min(1280/image.width,1280/image.height,1),out=canvas(Math.max(1,Math.round(image.width*scale)),Math.max(1,Math.round(image.height*scale))),ctx=out.getContext('2d');let masked;
+ const image=await bitmap(blob);mask=mask||detectedPlateMask(image);const scale=Math.min(1280/image.width,1280/image.height,1),out=canvas(Math.max(1,Math.round(image.width*scale)),Math.max(1,Math.round(image.height*scale))),ctx=out.getContext('2d');let masked;
  try{ctx.drawImage(image,0,0,out.width,out.height);ctx.fillStyle='#808080';const x=Math.max(0,Math.floor(out.width*mask.x)-5),y=Math.max(0,Math.floor(out.height*mask.y)-5);ctx.fillRect(x,y,out.width-x,out.height-y);masked=await jpeg(out,.85);}finally{image.close();out.width=out.height=0;}
  const analysis=await renderPhoto(masked,photo,'',{plate:false,maxWidth:960});const im=await bitmap(analysis),small=canvas(64,64),s=small.getContext('2d',{willReadFrequently:true});
  try{

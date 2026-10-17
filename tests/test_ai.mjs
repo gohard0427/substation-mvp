@@ -43,7 +43,7 @@ test('zero reviewed references still allows image analysis and lifetime cap surv
  const c=isolated.client();await c.login();let job=await(await c.request('/api/jobs',{})).json();const id='2'.repeat(24);
  job=await(await c.request(`/api/jobs/${job.id}/source/${id}`,jpeg(),{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:'folder/photo.jpg',hash:'c'.repeat(64)})),'X-Revision':String(job.revision)})).json();
  const request=()=>c.request(`/api/jobs/${job.id}/analyse/${id}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});
- let response=await request();assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(isolated.externalCalls.length,1);assert.equal(isolated.externalCalls[0].model,DEFAULT_VISION_MODEL);assert.equal(isolated.externalCalls[0].max_output_tokens,3000);assert.equal(isolated.externalCalls[0].reasoning.effort,'none');assert.equal(job.photos[0].confirmed,false);
+ let response=await request();assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(isolated.externalCalls.length,1);assert.equal(isolated.externalCalls[0].model,DEFAULT_VISION_MODEL);assert.equal(isolated.externalCalls[0].max_output_tokens,4000);assert.equal(isolated.externalCalls[0].reasoning.effort,'low');assert.equal(job.photos[0].confirmed,false);
  // Cache continues to work at the total cap.
  response=await request();assert.equal(response.status,200);job=await response.json();assert.equal(isolated.externalCalls.length,1);
  await isolated.db.exec("update np_ai_runs set created_at=now()-interval '25 hours'");
@@ -71,4 +71,14 @@ test('admin connection probe sends no photos and performs no billable inference'
 
 test('only admin can change daily trial calls; total trial cap stays independent',async()=>{
  const isolated=await backend();try{const worker=isolated.client(),admin=isolated.client();await worker.login();await admin.login('admin');assert.equal((await worker.request('/api/settings',{aiDailyLimit:100})).status,403);assert.equal((await admin.request('/api/settings',{aiDailyLimit:101})).status,400);const saved=await admin.request('/api/settings',{aiDailyLimit:100});assert.equal(saved.status,200);const settings=await(await worker.request('/api/settings')).json();assert.equal(settings.aiDailyLimit,100);assert.equal(settings.aiTotalLimit,100);}finally{await isolated.db.close();}
+});
+
+test('reference selection balances distinct work types instead of repeating the dominant class',()=>{
+ const base={reviewed:true,image_ready:true,split:'train',object_path:'private.jpg',visual_signature:{version:'color-spatial-v1',values:Array(64).fill(.2)}};
+ const refs=[{...base,id:'a',label:{work:'동작특성 시험'}},{...base,id:'b',label:{work:'동작특성 시험'}},{...base,id:'c',label:{work:'코일 저항 측정'}},{...base,id:'d',label:{work:'점검'}},{...base,id:'e',split:'evaluation',label:{work:'평가 정답'}}];
+ assert.deepEqual(nearest(refs,Array(64).fill(.2),'').map(r=>r.id),['a','c','d']);
+});
+test('an unsupported model ambiguity ID cannot turn a generic tester into PMA equipment',async()=>{
+ const cfg=await b.rpc('config_get');const generic=validateResult({...result,equipmentType:'GIS',ambiguityGroupId:'pma-measurement'},cfg.workTypes,cfg.ambiguityGroups);assert.equal(generic.ambiguityGroupId,null);
+ assert.equal(validateResult({...result,equipmentType:'GIS'},cfg.workTypes,cfg.ambiguityGroups,'PMA GIS').ambiguityGroupId,'pma-measurement');
 });
