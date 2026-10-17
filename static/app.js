@@ -102,15 +102,16 @@ function open(value) {
     <p data-preview-label class="muted">방향 보정 미리보기</p>
     ${p.duplicate ? '<span class="tag">중복 사진 · 유지됨</span>' : ''}
     <label>방향 보정<select data-key="rotation">${[0,1,2,3].map(n => `<option value="${n}" ${p.rotation === n ? 'selected' : ''}>${n * 90}° 회전</option>`).join('')}</select></label></div>
-    <div><div class="grid">${[['date','일자','date'], ['location','위치','text'], ['equipment','기기명','text'], ['equipmentType','설비 타입','text']].map(([key,label,type]) => `<label>${label}<input data-key="${key}" type="${type}" value="${esc(p[key])}"></label>`).join('')}</div>
+    <div><div class="grid">${[['date','일자','date'], ['location','위치','text'], ['equipment','기기명','text']].map(([key,label,type]) => `<label>${label}<input data-key="${key}" type="${type}" value="${esc(p[key])}"></label>`).join('')}</div>
     <label>작업 내용 · 직접 확정<input data-key="work" value="${esc(p.work)}" list="works" placeholder="사진에 해당하는 작업 하나를 입력"></label>
-    <label class="check"><input data-key="measurementScene" type="checkbox" ${p.measurementScene ? 'checked' : ''}>측정 장면입니다 · 구분 필요 규칙 적용</label>
+    <details class="photo-options"><summary>추가 설정 · 설비 정보</summary><label>설비 타입 · 선택 입력<input data-key="equipmentType" value="${esc(p.equipmentType)}"></label><label class="check"><input data-key="measurementScene" type="checkbox" ${p.measurementScene ? 'checked' : ''}>측정 장면입니다 · 구분 필요 규칙 적용</label>
+    <label class="check" ${browserEngine ? 'hidden' : ''}><input data-key="hasExistingPlate" type="checkbox" ${p.hasExistingPlate ? 'checked' : ''}>${browserEngine ? '기존 명판이 있는 사진 · 검수 표시 (AI 사본은 기본 영역을 항상 가립니다)' : '기존 명판이 있는 사진 · AI 분석 사본에서 명판 가리기'}</label></details>
     <div data-ambiguity class="alert" hidden><strong>작업 내용 확인 필요</strong><p data-reason></p><label>직접 선택<select data-choice></select></label><p class="muted">기타를 선택하면 위 작업 내용란에 직접 입력하세요.</p></div>
-    <label class="check"><input data-key="hasExistingPlate" type="checkbox" ${p.hasExistingPlate ? 'checked' : ''}>${browserEngine ? '기존 명판이 있는 사진 · 검수 표시 (AI 사본은 기본 영역을 항상 가립니다)' : '기존 명판이 있는 사진 · AI 분석 사본에서 명판 가리기'}</label><div data-recommendations></div>
-    <label class="check"><input data-key="confirmed" type="checkbox" ${p.confirmed ? 'checked' : ''}>정보와 작업 내용을 확인했습니다</label>
-    <label class="check"><input data-key="excluded" type="checkbox" ${p.excluded ? 'checked' : ''}>이번 결과물에서 제외</label></div></article>`).join('');
+<div data-recommendations></div>
+    <input data-key="confirmed" type="checkbox" hidden ${p.confirmed ? 'checked' : ''}><button type="button" data-confirm>내용 확정</button>
+    <details class="photo-menu"><summary>사진 메뉴</summary><input data-key="excluded" type="checkbox" hidden ${p.excluded ? 'checked' : ''}><button type="button" class="secondary" data-exclude>이번 결과물에서 제외</button></details></div></article>`).join('');
   $('#photos').oninput = onPhotoInput;
-  $('#photos').onclick = event => { const button = event.target.closest('[data-candidate]'); if (!button) return; const input = button.closest('[data-id]').querySelector('[data-key="work"]'); input.value = button.dataset.candidate; onPhotoInput({target:input}); };
+  $('#photos').onclick = event => { const action = event.target.closest('[data-confirm],[data-exclude]'); if (action) { const card=action.closest('[data-id]'); const field=card.querySelector(action.hasAttribute('data-confirm')?'[data-key="confirmed"]':'[data-key="excluded"]'); field.checked=!field.checked; onPhotoInput({target:field}); return; } const button = event.target.closest('[data-candidate]'); if (!button) return; const input = button.closest('[data-id]').querySelector('[data-key="work"]'); input.value = button.dataset.candidate; onPhotoInput({target:input}); };
   update();
   if (!browserEngine && ['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll();
 }
@@ -175,6 +176,9 @@ function update() {
   for (const card of document.querySelectorAll('[data-id]')) {
     const photo = job.photos.find(p => p.id === card.dataset.id);
     const ready = job.state === 'ready' && !photo.excluded;
+    const confirmButton=card.querySelector('[data-confirm]');
+    confirmButton.textContent=photo.confirmed?'확정 완료 · 취소':'내용 확정'; confirmButton.setAttribute('aria-pressed',String(!!photo.confirmed)); confirmButton.disabled=locked||blocked||job.state==='deleting'||photo.excluded;
+    const excludeButton=card.querySelector('[data-exclude]'); excludeButton.textContent=photo.excluded?'결과물에 다시 포함':'이번 결과물에서 제외'; excludeButton.disabled=locked||blocked||job.state==='deleting';
     const src = ready ? `/api/jobs/${job.id}/result/${photo.id}?v=${job.revision}` : `/api/jobs/${job.id}/image/${photo.id}?rotation=${photo.rotation}`;
     const img = card.querySelector('[data-preview]'); if(job.state==='deleting'){img.removeAttribute('src');img.alt='서버 사진 삭제 중';}else if (browserEngine) browserEngine.setPreview(img,job,photo,ready); else if (img.getAttribute('src') !== src) img.src = src;
     const link = card.querySelector('[data-result]'); link.hidden = !ready;
