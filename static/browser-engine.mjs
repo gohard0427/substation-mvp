@@ -52,7 +52,7 @@ export async function inspectUpload(files,{maxPhotos=LIMITS.photos}={}){
  try{
   for(const file of files){
    if(/\.zip$/i.test(file.name)){
-    if(file.size>LIMITS.zip)throw Error('ZIP은 최대 90MiB입니다. 하루 단위로 나누어 주세요.');
+    if(file.size>LIMITS.zip)throw Error('ZIP은 최대 500MiB입니다. 파일을 나누어 주세요.');
     await checkZipDirectory(file);
     const reader=new ZipReader(new BlobReader(file),{useWebWorkers:false});readers.push(reader);const entries=await reader.getEntries();
     if(entries.length>2000)throw Error('ZIP 항목은 최대 2,000개입니다.');
@@ -60,7 +60,7 @@ export async function inspectUpload(files,{maxPhotos=LIMITS.photos}={}){
      const path=safePath(zipEntryPath(entry));if(entry.directory)continue;
      if(entry.encrypted)throw Error('암호화 ZIP은 지원하지 않습니다.');
      if(entry.uncompressedSize>LIMITS.source||entry.uncompressedSize/Math.max(entry.compressedSize,1)>200)throw Error('ZIP의 파일 크기 또는 압축 비율 제한을 초과했습니다.');
-     expanded+=entry.uncompressedSize;if(expanded>LIMITS.expanded)throw Error('압축 해제 용량은 최대 150MiB입니다. ZIP을 나누어 주세요.');
+     expanded+=entry.uncompressedSize;if(expanded>LIMITS.expanded)throw Error('압축 해제 용량은 최대 1GiB입니다. ZIP을 나누어 주세요.');
      if(!/\.(jpe?g|png)$/i.test(path)){warnings.push(path+': 지원하지 않는 형식');continue;}
      const mode=entry.externalFileAttributes>>>16;if((mode&0xf000)===0xa000)throw Error('ZIP의 링크 파일은 허용하지 않습니다.');
      items.push({path,size:entry.uncompressedSize,read:()=>readEntry(entry)});

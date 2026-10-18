@@ -5,7 +5,7 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 await rm(root+'dist',{recursive:true,force:true});await mkdir(root+'dist',{recursive:true});
 for(const file of ['index.html','style.css','app.js']){
  let source=await readFile(root+'static/'+file,'utf8');
- if(file==='index.html')source=source.replace('최대 200MB','최대 90MiB').replace('<link rel="stylesheet" href="style.css">','<link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="style.css">');
+ if(file==='index.html')source=source.replace('최대 200MB','최대 500MiB').replace('<link rel="stylesheet" href="style.css">','<link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="style.css">');
  if(file==='style.css')source=source.replace(/^@import url\([^\n]+\);\s*/,'');
  await writeFile(root+'dist/'+file,source);
 }

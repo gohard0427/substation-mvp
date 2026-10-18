@@ -4,6 +4,7 @@ import {freeGateway} from '../../cloudflare/free-api.mjs';
 export async function backend({visionResult}={}){
  const db=new PGlite();await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');await db.exec(await readFile('supabase/migrations/001_free_mvp.sql','utf8'));
  await db.exec(await readFile('supabase/schema/ai-reference.sql','utf8'));await db.exec(await readFile('supabase/schema/ai-trial-limit.sql','utf8'));await db.exec(await readFile('supabase/schema/maintenance.sql','utf8'));
+ await db.exec(await readFile('supabase/schema/upload-limits.sql','utf8'));
  const maintenanceRpc=async(action,data={})=>(await db.query('select public.np_maintenance_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
  const aiRpc=async(action,data={})=>(await db.query('select public.np_ai_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
  const externalCalls=[];

@@ -92,3 +92,14 @@ test('provider outage, throttling, bad key and UID mismatch are not reported as 
  const request=new Request(b.env.PUBLIC_ORIGIN+'/api/login',{method:'POST',headers:{Origin:b.env.PUBLIC_ORIGIN},body:JSON.stringify({role:'worker',password:'test-only-password'})});
  const response=await freeGateway(request,{...b.env,WORKER_USER_ID:'00000000-0000-4000-8000-000000000009'},b.fetcher);assert.equal(response.status,503);assert.match((await response.json()).error,/사용자 ID/);
 });
+test('source upload accepts 200 photos and rejects photo 201',async()=>{
+ const c=b.client();await c.login();let job=await(await c.request('/api/jobs',{})).json();
+ for(let i=0;i<200;i++){
+  const id=i.toString(16).padStart(24,'0');
+  const response=await c.request(`/api/jobs/${job.id}/source/${id}`,jpeg(),{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:`사진${i}.jpg`,hash:'a'.repeat(64)})),'X-Revision':String(job.revision)});
+  assert.equal(response.status,200,await response.clone().text());job=await response.json();
+ }
+ assert.equal(job.photos.length,200);
+ const response=await c.request(`/api/jobs/${job.id}/source/${'f'.repeat(24)}`,jpeg(),{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:'초과.jpg',hash:'a'.repeat(64)})),'X-Revision':String(job.revision)});
+ assert.equal(response.status,413);
+});

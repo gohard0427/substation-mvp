@@ -1,6 +1,6 @@
 export const DEFAULT_PROJECT='2026~2026년도 시흥전력지사 변전협력회사 총액공사';
 export class ValidationError extends Error {}
-export const LIMITS={photos:50,source:8*1024*1024,result:2*1024*1024,zip:90*1024*1024,expanded:150*1024*1024,pixels:20_000_000,storage:700*1024*1024};
+export const LIMITS={photos:200,source:8*1024*1024,result:2*1024*1024,zip:500*1024*1024,expanded:1024*1024*1024,pixels:20_000_000,storage:700*1024*1024};
 export const PROFILE={width:911/2048,height:336/1536,label:132/2048,font:50/2048,padding:12/2048,version:'sample-profile-browser-v1'};
 export const normalized=value=>String(value||'').replace(/\s+/g,'').toLowerCase();
 export function safePath(value){

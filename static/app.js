@@ -8,6 +8,7 @@ let noticeTimer;
 function notice(message, duration = 0) {
   clearTimeout(noticeTimer);
   $('#notice').textContent = message;
+  const taskNotice=document.querySelector('#taskNotice');if(taskNotice)taskNotice.textContent=message;
   if (duration) noticeTimer = setTimeout(() => { $('#notice').textContent = ''; }, duration);
 }
 async function api(path, data) {
@@ -42,7 +43,7 @@ async function boot() {
   if (settings.processingMode === 'browser' && !browserEngine) browserEngine = await import('./browser-engine.mjs');
   $('#freeModeInfo').hidden = !browserEngine;
   $('#modeLabel').textContent = browserEngine ? '무료 · 하루 작업 MVP' : '수동 작업 MVP';
-  $('#uploadLimit').textContent = browserEngine ? 'JPG · PNG · ZIP / 작업당 최대 50장 · ZIP 90MiB' : 'JPG · PNG · ZIP / 최대 200MB';
+  $('#uploadLimit').textContent = browserEngine ? 'JPG · PNG · ZIP / 작업당 최대 200장 · ZIP 500MiB' : 'JPG · PNG · ZIP / 최대 200MB';
   $('#project').value = settings.project;$('#aiDailyLimit').value=settings.aiDailyLimit||20;$('#aiDailyLimit').closest('label').hidden=!browserEngine;
   $('#extraProjects').value = (settings.projects||[]).filter(v=>v!==settings.project).join('\n');
   $('#workTypes').value = settings.workTypes.join('\n');
