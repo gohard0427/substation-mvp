@@ -167,10 +167,10 @@ export async function prepareAnalysis(blob,photo,mask){
   return {blob:analysis,values:values.map(v=>Math.max(0,Math.min(1,v)))};
  }finally{im.close();small.width=small.height=0;}
 }
-export async function analyse(job,api,progress){
+export async function analyse(job,api,progress,{analysisVersion}={}){
  previewsPaused=true;await activePreview;
  try{
-  const pending=job.photos.filter(p=>!p.excluded&&!p.confirmed).sort((a,b)=>Number(/대상[ _]?기기/.test(b.path)||b.work==='대상 기기')-Number(/대상[ _]?기기/.test(a.path)||a.work==='대상 기기'));
+  const pending=job.photos.filter(p=>!p.excluded&&!p.confirmed&&(p.analysisStatus!=='complete'||(analysisVersion&&p.recommendation?.result?.analysisVersion!==analysisVersion))).sort((a,b)=>Number(/대상[ _]?기기/.test(b.path)||b.work==='대상 기기')-Number(/대상[ _]?기기/.test(a.path)||a.work==='대상 기기'));
   let done=0;const failures=new Map();
   for(const p of pending){
    progress(job,`AI 분석 중 ${done+1}/${pending.length}`);

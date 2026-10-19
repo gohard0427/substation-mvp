@@ -54,6 +54,19 @@ try{
  assert.equal(saved.photos[0].analysisStatus,'complete');
  await aiPage.reload();await aiPage.locator('#jobs button').first().click();
  assert.equal(await aiPage.locator('[data-key="work"]').inputValue(),'동작특성 시험');assert.equal(b.externalCalls.length,1);
+ // Add one uploaded-but-unanalysed photo, mark the explicitly requested resume,
+ // and verify opening the app alone completes only that remaining photo.
+ await aiPage.evaluate(async()=>{
+  const source=await(await fetch(`/api/jobs/${job.id}/image/${job.photos[0].id}`)).blob();
+  const response=await fetch(`/api/jobs/${job.id}/source/${'c'.repeat(24)}`,{method:'POST',headers:{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:'남은사진.jpg',hash:'c'.repeat(64)})),'X-Revision':String(job.revision)},body:source});
+  if(!response.ok)throw Error(await response.text());
+ });
+ await b.db.query("update np_jobs set payload=payload||'{\"resumeAnalysisOnOpen\":true}'::jsonb,revision=revision+1 where id=$1",[saved.id]);
+ const resumedRequests=[];aiPage.on('request',r=>{if(r.method()==='POST'&&r.url().includes('/analyse/'))resumedRequests.push(r.url());});
+ await aiPage.reload();await aiPage.waitForFunction(()=>document.querySelector('#notice').textContent.includes('AI 분석 완료'));await aiPage.waitForFunction(()=>document.querySelector('#upload').disabled===false);
+ assert.equal(b.externalCalls.length,2);assert.equal(resumedRequests.length,1);assert.ok(resumedRequests[0].endsWith('c'.repeat(24)));
+ const resumed=await aiPage.evaluate(async()=>await(await fetch('/api/jobs/'+job.id)).json());assert.equal(resumed.photos.length,2);assert.ok(resumed.photos.every(p=>p.analysisStatus==='complete'));
+
  assert.deepEqual(errors,[]);
  } finally {await aiContext.close();}
  console.log('PASS E2E: mobile login, Korean ZIP, corrupt/duplicate handling, PMA gate, project snapshot, partial generation recovery, ZIP bytes/EXIF, device isolation, logout recovery, confirmed deletion. No paid AI calls.');

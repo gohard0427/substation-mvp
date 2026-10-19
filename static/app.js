@@ -55,7 +55,8 @@ async function boot() {
   if(browserEngine && settings.role === 'admin') { const referenceRoot = document.querySelector('#referenceAdmin'); if(referenceRoot) { try { const module=await import('./reference-admin.mjs'); await module.mount(referenceRoot,api,notice,()=>notice('작업 목록은 화면을 새로고침하면 반영됩니다.')); } catch(e) { notice(e.message); } } }
   if(browserEngine&&settings.role==='admin'){try{const status=await api('/api/maintenance');$('#maintenanceStatus').textContent=status.lastSuccessAt?'서버 자동 정리 최근 성공: '+new Date(status.lastSuccessAt).toLocaleString('ko-KR'):'서버 자동 정리 실행 기록이 아직 없습니다.';}catch{$('#maintenanceStatus').textContent='서버 자동 정리 상태를 확인하지 못했습니다.';}}
   renderGroups();
-  await list();
+  const jobs=await list();
+  await resumeRequestedAnalysis(jobs);
 }
 async function list() {
   const jobs = await api('/api/jobs');
@@ -66,6 +67,15 @@ async function list() {
     button.onclick = run(async () => { if (!blocked) await flush(); open(saved.state==='deleting'?{...saved,warnings:saved.warnings||[]}:await api('/api/jobs/' + saved.id+'?touch=1')); });
     $('#jobs').append(button);
   }
+  return jobs;
+}
+async function resumeRequestedAnalysis(jobs) {
+  if(!browserEngine||!settings.aiConfigured)return;
+  const saved=jobs.find(j=>j.resumeAnalysisOnOpen===true&&j.state==='uploaded'&&j.photos.some(p=>!p.excluded&&!p.confirmed&&p.analysisStatus!=='complete'));
+  if(!saved)return;
+  open(await api('/api/jobs/'+saved.id+'?touch=1'));
+  notice('중단된 분석을 이어갑니다. 완료된 사진은 건너뜁니다.');
+  await exclusive(analyseCurrent);
 }
 $('#loginForm').onsubmit = async event => {
   event.preventDefault();
@@ -276,7 +286,7 @@ $('#applyBatch').onclick = run(async () => exclusive(async () => {
 }));
 async function analyseCurrent() {
   if(browserEngine) {
-    job=await browserEngine.analyse(job,api,(current,message)=>{job=current;update();if(message)notice(message);});
+    job=await browserEngine.analyse(job,api,(current,message)=>{job=current;update();if(message)notice(message);},{analysisVersion:settings.aiPromptVersion});
     let changed=false;
     for(const photo of job.photos) {
       const result=photo.analysisStatus==='complete' && photo.recommendation?.result;
