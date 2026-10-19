@@ -44,11 +44,11 @@ async function boot() {
   $('#freeModeInfo').hidden = !browserEngine;
   $('#modeLabel').textContent = browserEngine ? '무료 · 하루 작업 MVP' : '수동 작업 MVP';
   $('#uploadLimit').textContent = browserEngine ? 'JPG · PNG · ZIP / 작업당 최대 200장 · ZIP 500MiB' : 'JPG · PNG · ZIP / 최대 200MB';
-  $('#project').value = settings.project;$('#aiDailyLimit').value=settings.aiDailyLimit||20;$('#aiDailyLimit').closest('label').hidden=!browserEngine;
+  $('#project').value = settings.project;$('#aiDailyLimit').value=settings.aiDailyLimit||20;$('#aiDailyLimit').closest('label').hidden=!browserEngine||!!settings.aiTrialUnlimited;$('#aiLimitHelp').textContent=settings.aiTrialUnlimited?'시험 기간: 앱의 호출·비용 제한 해제됨. 실제 AI 이용료가 발생합니다.':'전체 시험은 추정 비용 3만 원 한도 안에서 처리합니다.';
   $('#extraProjects').value = (settings.projects||[]).filter(v=>v!==settings.project).join('\n');
   $('#workTypes').value = settings.workTypes.join('\n');
   $('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join('');
-  $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회 · 시험 예산 추정 한도 ${(settings.aiBudgetKrw||30000).toLocaleString()}원. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
+  $('#aiInfo').textContent = settings.aiConfigured ? (settings.aiTrialUnlimited ? '시험 기간 · 앱의 호출·비용 제한 해제됨. 실제 AI 이용료가 발생합니다.' : `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회 · 시험 예산 추정 한도 ${(settings.aiBudgetKrw||30000).toLocaleString()}원. 추천은 반드시 직접 확인하세요.`) : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
   $('#login').hidden = true;$('#logout').hidden=!browserEngine;$('#project').readOnly=!!browserEngine;$('#extraProjects').closest('label').hidden=!browserEngine;$('#jobProjectPanel').hidden=!browserEngine;$('#referenceAdminPanel').hidden=!browserEngine;
   $('#workspace').hidden = false;
   $('#admin').hidden = settings.role !== 'admin';

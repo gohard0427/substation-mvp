@@ -97,3 +97,18 @@ test('100 historical calls no longer block analysis; budget blocks new calls but
  response=await request();assert.equal(response.status,429);assert.match((await response.json()).error,/예산/);assert.equal(isolated.externalCalls.length,1);
  }finally{await isolated.db.close();}
 });
+
+test('server trial switch bypasses daily, lifetime, budget caps but is not worker-editable',async()=>{
+ const isolated=await backend({visionResult:result});try{
+ isolated.env.AI_ENABLED='true';isolated.env.OPENAI_API_KEY='test-only-ai-key';isolated.env.AI_TOTAL_LIMIT='1';isolated.env.AI_DAILY_LIMIT='1';
+ await isolated.db.exec("insert into np_ai_runs(job_id,photo_id,signature,status,usage) select gen_random_uuid(),'old','old','complete','{\"input_tokens\":20000000,\"output_tokens\":0}'::jsonb from generate_series(1,201)");
+ const c=isolated.client();await c.login();assert.equal((await c.request('/api/settings',{aiTrialUnlimited:true})).status,403);
+ await isolated.db.exec("update np_config set payload=payload||'{\"aiTrialUnlimited\":true}'::jsonb");
+ const cfg=await(await c.request('/api/settings')).json();assert.equal(cfg.aiTrialUnlimited,true);assert.equal(cfg.aiDailyLimit,null);assert.equal(cfg.aiTotalLimit,null);assert.equal(cfg.aiBudgetKrw,null);
+ let job=await(await c.request('/api/jobs',{})).json();const id='9'.repeat(24);
+ job=await(await c.request(`/api/jobs/${job.id}/source/${id}`,jpeg(),{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:'photo.jpg',hash:'9'.repeat(64)})),'X-Revision':String(job.revision)})).json();
+ const request=()=>c.request(`/api/jobs/${job.id}/analyse/${id}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});
+ let response=await request();assert.equal(response.status,200,await response.clone().text());assert.equal(isolated.externalCalls.length,1);
+ response=await request();assert.equal(response.status,200);assert.equal(isolated.externalCalls.length,1);assert.equal((await isolated.aiRpc('usage')).trialUnlimited,true);
+ }finally{await isolated.db.close();}
+});
