@@ -12,7 +12,7 @@ export async function prepareSource(blob){
  finally{image.close();out.width=out.height=0;}
 }
 export async function ensureFont(text){const loaded=await document.fonts.load('700 31px "Noto Sans KR"',text||'공사명 위치 기기명 내용 일자');if(!loaded.length||!document.fonts.check('700 31px "Noto Sans KR"',text))throw Error('한글 글꼴을 불러오지 못했습니다. 연결을 확인하고 다시 생성하세요.');}
-export async function renderPhoto(blob,photo,project,{plate=true,maxWidth=1280}={}){
+export async function renderPhoto(blob,photo,project,{plate=true,maxWidth=1280,quality=.85}={}){
  if(plate)await ensureFont('공사명 위치 기기명 내용 일자'+project+photo.location+photo.equipment+photo.work+photo.date);
  const image=await bitmap(blob);const turns=((image.height>image.width?-1:0)+(photo.rotation||0)+4)%4;
  const bw=turns%2?image.height:image.width,bh=turns%2?image.width:image.height;
@@ -38,7 +38,7 @@ export async function renderPhoto(blob,photo,project,{plate=true,maxWidth=1280}=
    }
    ctx.fillStyle='#222';ctx.fillRect(x,y,1,ph);ctx.fillRect(x+col,y,1,ph);ctx.fillRect(width-1,y,1,ph);ctx.fillRect(x,height-1,pw,1);
   }
-  return await jpeg(out,.85);
+  return await jpeg(out,quality);
  }finally{image.close();out.width=out.height=0;}
 }
 async function readEntry(entry){
@@ -156,11 +156,11 @@ function detectedPlateMask(image){
   return best||{x:.44,y:.75};
  }finally{small.width=small.height=0;}
 }
-export async function prepareAnalysis(blob,photo,mask){
+export async function prepareAnalysis(blob,photo,mask,{maxWidth=960,quality=.85}={}){
  // Mask before rotation so a manual turn cannot move an old answer outside the mask.
  const image=await bitmap(blob);mask=mask||detectedPlateMask(image);const scale=Math.min(1280/image.width,1280/image.height,1),out=canvas(Math.max(1,Math.round(image.width*scale)),Math.max(1,Math.round(image.height*scale))),ctx=out.getContext('2d');let masked;
  try{ctx.drawImage(image,0,0,out.width,out.height);ctx.fillStyle='#808080';const x=Math.max(0,Math.floor(out.width*mask.x)-5),y=Math.max(0,Math.floor(out.height*mask.y)-5);ctx.fillRect(x,y,out.width-x,out.height-y);masked=await jpeg(out,.85);}finally{image.close();out.width=out.height=0;}
- const analysis=await renderPhoto(masked,photo,'',{plate:false,maxWidth:960});const im=await bitmap(analysis),small=canvas(64,64),s=small.getContext('2d',{willReadFrequently:true});
+ const analysis=await renderPhoto(masked,photo,'',{plate:false,maxWidth,quality});const im=await bitmap(analysis),small=canvas(64,64),s=small.getContext('2d',{willReadFrequently:true});
  try{
   s.drawImage(im,0,0,64,64);const pixels=s.getImageData(0,0,64,64).data,values=Array(64).fill(0);
   for(let i=0;i<pixels.length;i+=4){for(let channel=0;channel<3;channel++)values[channel*16+(pixels[i+channel]>>4)]+=1/4096;const pos=i/4,row=Math.floor(pos/64),col=pos%64;values[48+Math.floor(row/16)*4+Math.floor(col/16)]+=(pixels[i]+pixels[i+1]+pixels[i+2])/(3*255*256);}
@@ -184,4 +184,23 @@ export async function analyse(job,api,progress,{analysisVersion}={}){
 export async function referencePlatePreview(blob,mask){
  const im=await bitmap(blob),x=Math.floor(im.width*mask.x),y=Math.floor(im.height*mask.y),width=im.width-x,height=im.height-y,scale=Math.min(640/width,1),out=canvas(Math.round(width*scale),Math.round(height*scale));
  try{out.getContext('2d').drawImage(im,x,y,width,height,0,0,out.width,out.height);return await jpeg(out,.9);}finally{im.close();out.width=out.height=0;}
+}
+
+// Uses the same authenticated job routes. No source leaves the application's storage.
+export async function learnConfirmed(job,api,progress=()=>{}) {
+ const status=await api(`/api/jobs/${job.id}/learn`);let saved=0,reused=0;
+ const pending=status.photos.filter(r=>!r.ready);
+ for(let i=0;i<pending.length;i++){
+  const {photo,signature}=pending[i];progress(`참고 자료 저장 ${i+1}/${pending.length}장`);
+  const source=await(await checked(await fetch(`/api/jobs/${job.id}/image/${photo.id}`))).blob();
+  let prepared=await prepareAnalysis(source,photo,undefined,{quality:.82});
+  if(prepared.blob.size>262144)prepared=await prepareAnalysis(source,photo,undefined,{maxWidth:768,quality:.82});
+  if(prepared.blob.size>262144){progress('일부 사진은 용량이 커서 수정 기록만 보관했습니다.');continue;}
+  try{
+   const response=await checked(await fetch(`/api/jobs/${job.id}/learn/${photo.id}`,{method:'POST',headers:{'X-Visual-Signature':JSON.stringify(prepared.values),'X-Learning-Signature':signature},body:prepared.blob}));
+   const result=await response.json();if(result.reused)reused++;else saved++;
+  }catch(e){if(e.status===409)continue;if(e.status===413){progress('참고 사진 보관 한도에 도달했습니다. 확정 기록은 유지됩니다.');return {saved,reused,quota:true};}throw e;}
+ }
+ progress(saved||reused?`참고 자료 저장 완료 · 새 사본 ${saved}장 · 중복 재사용 ${reused}장`:'확정 기록·참고 자료가 저장되어 있습니다.');
+ return {saved,reused};
 }

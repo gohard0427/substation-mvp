@@ -4,7 +4,17 @@ const normalized = value => String(value || '').replace(/\s+/g, '').toLowerCase(
 const stateNames = {uploaded:'확인 중', analysis_queued:'AI 분석 대기', analysing:'AI 분석 중', queued:'생성 대기 중', generating:'명판 생성 중', ready:'다운로드 가능', failed:'생성 실패', deleting:'사진 삭제 중'};
 let job, settings, poll, autosave, browserEngine, stopRequested = false, busy = false, blocked = false;
 let editEpoch = 0, savedEpoch = 0, queue = Promise.resolve(), photoFilter = 'all';
-let noticeTimer;
+let noticeTimer, learningTimer, learningPromise;
+const learningJobs=new Set();
+function scheduleLearning(id=job?.id){
+ if(!id||!settings?.learningEnabled||!browserEngine?.learnConfirmed)return;learningJobs.add(id);clearTimeout(learningTimer);
+ learningTimer=setTimeout(()=>{if(busy){scheduleLearning(id);return;}syncLearning().catch(e=>{$('#learningStatus').textContent='참고 자료 저장 대기 · '+e.message;});},700);
+}
+async function syncLearning(){
+ clearTimeout(learningTimer);if(learningPromise)return learningPromise;
+ learningPromise=(async()=>{while(learningJobs.size){const id=learningJobs.values().next().value;learningJobs.delete(id);try{await browserEngine.learnConfirmed({id},api,message=>{$('#learningStatus').textContent=message;});}catch(e){if([403,404,410].includes(e.status))continue;learningJobs.add(id);throw e;}}})();
+ try{await learningPromise;}finally{learningPromise=null;}
+}
 function notice(message, duration = 0) {
   clearTimeout(noticeTimer);
   $('#notice').textContent = message;
@@ -57,6 +67,10 @@ async function boot() {
   renderGroups();
   const jobs=await list();
   await resumeRequestedAnalysis(jobs);
+  if(settings.learningEnabled){
+    if(!job){const saved=jobs.find(j=>j.state!=='deleting'&&j.photos.some(p=>p.confirmed&&!p.excluded));if(saved)open(await api('/api/jobs/'+saved.id));}
+    for(const saved of jobs)if(saved.state!=='deleting'&&saved.photos.some(p=>p.confirmed&&!p.excluded))scheduleLearning(saved.id);
+  }
 }
 async function list() {
   const jobs = await api('/api/jobs');
@@ -141,6 +155,7 @@ function open(value) {
 <div data-recommendations></div>
     <input data-key="confirmed" type="checkbox" hidden ${p.confirmed ? 'checked' : ''}><button type="button" data-confirm>내용 확정</button>
     <details class="photo-menu"><summary>사진 메뉴</summary><input data-key="excluded" type="checkbox" hidden ${p.excluded ? 'checked' : ''}><button type="button" class="secondary" data-exclude>이번 결과물에서 제외</button></details></div></article>`).join('');
+  scheduleLearning(job.id);
   $('#photos').oninput = onPhotoInput;
   $('#photos').onclick = event => { const action = event.target.closest('[data-confirm],[data-exclude]'); if (action) { const card=action.closest('[data-id]'); const field=card.querySelector(action.hasAttribute('data-confirm')?'[data-key="confirmed"]':'[data-key="excluded"]'); field.checked=!field.checked; onPhotoInput({target:field}); return; } const button = event.target.closest('[data-candidate]'); if (!button) return; const input = button.closest('[data-id]').querySelector('[data-key="work"]'); input.value = button.dataset.candidate; onPhotoInput({target:input}); };
   update();
@@ -265,7 +280,7 @@ function persist() {
     try {
       const saved = await api(`/api/jobs/${target.id}/save`, {photos, project:target.project||settings.project, revision:target.revision || 0});
       if (job !== target) return;
-      target.revision = saved.revision; savedEpoch = epoch;
+      target.revision = saved.revision; savedEpoch = epoch;scheduleLearning(target.id);
       if (editEpoch === epoch) { target.state = saved.state; target.photos = saved.photos; }
       update();
     } catch (error) {
@@ -319,8 +334,8 @@ async function analyseCurrent() {
 $('#analyse').onclick = run(async () => exclusive(analyseCurrent));
 $('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (browserEngine) await browserGenerate(); else if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
 $('#finish').onclick = run(async () => {
-  if (!confirm('ZIP을 휴대폰 또는 PC에 저장했나요? 서버 사진과 결과물을 영구 삭제합니다.')) return;
-  await exclusive(async () => { await api(`/api/jobs/${job.id}/finish`, {}); browserEngine?.clearPreviews(); job = null; $('#editor').hidden = true; await list(); notice('임시 사진과 결과물을 삭제했습니다.'); });
+  if (!confirm('ZIP을 휴대폰 또는 PC에 저장했나요? 원본·완성 사진은 삭제하고 확정 기록과 참고용 사본은 유지합니다.')) return;
+  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`, {}); browserEngine?.clearPreviews(); job = null; $('#editor').hidden = true; await list(); notice('임시 사진과 결과물을 삭제했습니다.'); });
 });
 window.addEventListener('beforeunload', event => { if (editEpoch !== savedEpoch && job) { event.preventDefault(); event.returnValue = ''; } });
 function renderGroups() {
@@ -354,7 +369,7 @@ $('#pause').onclick = run(async () => {
 });
 $('#discard').onclick = run(async () => {
   if (!confirm('이 작업과 서버의 모든 임시 사진을 삭제할까요? 삭제 후 복구할 수 없습니다.')) return;
-  await exclusive(async () => { await api(`/api/jobs/${job.id}/finish`,{}); browserEngine?.clearPreviews(); job = null; editEpoch = savedEpoch = 0; $('#editor').hidden = true; await list(); notice('작업을 종료하고 서버 파일을 삭제했습니다.'); });
+  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`,{}); browserEngine?.clearPreviews(); job = null; editEpoch = savedEpoch = 0; $('#editor').hidden = true; await list(); notice('작업을 종료하고 서버 파일을 삭제했습니다.'); });
 });
 let freeDownloadKey = '';
 function renderFreeDownloads() {

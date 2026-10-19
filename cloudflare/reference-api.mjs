@@ -7,6 +7,7 @@ export const totalLimit=(env,cfg={})=>Math.max(1,Math.min(10000,Number.parseInt(
 export const dailyLimit=(env,cfg={})=>Math.max(1,Math.min(200,Number.parseInt(cfg.aiDailyLimit??env.AI_DAILY_LIMIT??'20',10)||20));
 export async function referenceRoute({path,request,client,admin,readJson,body,json,env,fetcher}){
  admin();
+ if(path==='/api/learning-summary'&&request.method==='GET')return json(await client.learningRpc('summary'));
  if(path==='/api/ai-status'&&request.method==='GET')return json(await checkVisionConnection(env,fetcher));
  if(path==='/api/references'&&request.method==='GET')return json(await client.aiRpc('references_list'));
  if(path==='/api/ai-usage'&&request.method==='GET')return json(await client.aiRpc('usage'));
@@ -39,7 +40,7 @@ export async function analysePhoto({request,env,client,job,photoId,args,body,fet
  if(photo.confirmed)throw new AppError('이미 확정한 사진은 분석하지 않습니다.',409);
  const bytes=await body(request,524288);validateImage(bytes,true);
  let features;try{features=signature(JSON.parse(request.headers.get('X-Visual-Signature')));}catch{throw new AppError('분석 이미지 특징을 확인하세요.');}
- const references=await client.aiRpc('references_list'),selected=nearest(references,features,analysisHint(photo));
+ const references=await client.learningRpc('candidates'),selected=nearest(references,features,analysisHint(photo));
  const cfg=await client.rpc('config_get');const model=visionModel(env),context=equipmentContext(job,photo);if(cfg.aiTrialUnlimited!==true&&!/^gpt-5\.4-mini(?:-2026-03-17)?$/.test(model))throw new AppError('현재 시험 예산 계산은 GPT-5.4 mini 모델만 지원합니다. 관리자에게 모델 설정 확인을 요청하세요.',503);const fingerprint=await analysisFingerprint(photo,cfg,selected,model,context);
  const claim=await client.aiRpc('analysis_claim',{...args,jobId:job.id,photoId,signature:fingerprint,revision:job.revision,limit:dailyLimit(env,cfg),totalLimit:totalLimit(env,cfg)});
  let result,usage;

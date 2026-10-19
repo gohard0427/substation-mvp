@@ -1,3 +1,4 @@
+import {learningRoute} from './worker-learning.mjs';
 import {visionModel,PROMPT_VERSION} from './vision.mjs';
 import {referenceRoute,analysePhoto,aiConfigured,dailyLimit,totalLimit} from './reference-api.mjs';
 import {SupabaseClient,AppError} from './supabase-client.mjs';
@@ -65,7 +66,7 @@ export async function freeGateway(request,env,fetcher=fetch){
   const cfg=await client.rpc('config_get');
   if(['/api/work-types','/api/ambiguity-groups','/api/revoke','/api/worker-password'].includes(path)&&request.method!=='POST')throw new AppError('POST 요청만 허용됩니다.',405);
   if(path==='/api/settings'){
-   if(request.method==='GET')return json({project:DEFAULT_PROJECT,projects:[DEFAULT_PROJECT,...(cfg.extraProjects||[])],workTypes:cfg.workTypes,ambiguityGroups:cfg.ambiguityGroups,role:session.role,processingMode:'browser',aiConfigured:aiConfigured(env),aiModel:visionModel(env),aiPromptVersion:PROMPT_VERSION,aiTrialUnlimited:cfg.aiTrialUnlimited===true,aiDailyLimit:cfg.aiTrialUnlimited===true?null:dailyLimit(env,cfg),aiTotalLimit:cfg.aiTrialUnlimited===true?null:totalLimit(env,cfg),aiBudgetKrw:cfg.aiTrialUnlimited===true?null:30000,storageBytes:cfg.storageBytes,storageLimit:cfg.storageLimit,limits:LIMITS});
+   if(request.method==='GET')return json({project:DEFAULT_PROJECT,projects:[DEFAULT_PROJECT,...(cfg.extraProjects||[])],workTypes:cfg.workTypes,ambiguityGroups:cfg.ambiguityGroups,role:session.role,processingMode:'browser',aiConfigured:aiConfigured(env),aiModel:visionModel(env),aiPromptVersion:PROMPT_VERSION,learningEnabled:true,aiTrialUnlimited:cfg.aiTrialUnlimited===true,aiDailyLimit:cfg.aiTrialUnlimited===true?null:dailyLimit(env,cfg),aiTotalLimit:cfg.aiTrialUnlimited===true?null:totalLimit(env,cfg),aiBudgetKrw:cfg.aiTrialUnlimited===true?null:30000,storageBytes:cfg.storageBytes,storageLimit:cfg.storageLimit,limits:LIMITS});
    admin();const value=await readJson(request);const aiDailyLimit=value.aiDailyLimit??dailyLimit(env,cfg);if(!Number.isInteger(aiDailyLimit)||aiDailyLimit<1||aiDailyLimit>200)throw new AppError('하루 AI 호출 한도는 1~200회입니다.');const projects=value.extraProjects??cfg.extraProjects??[];if(!Array.isArray(projects)||projects.length>30||projects.some(v=>typeof v!=='string'||!v.trim()||v.length>150||/[\x00-\x1f]/.test(v)))throw new AppError('추가 공사명은 한 줄에 하나씩, 최대 30개를 입력하세요.');const extraProjects=[...new Set(projects.map(v=>v.trim()).filter(v=>v!==DEFAULT_PROJECT))];await client.rpc('config_set',{project:DEFAULT_PROJECT,extraProjects,aiDailyLimit});return json({project:DEFAULT_PROJECT,projects:[DEFAULT_PROJECT,...extraProjects],aiDailyLimit});
   }
   if(path==='/api/work-types'){admin();const {workTypes}=await readJson(request);if(!Array.isArray(workTypes)||!workTypes.length||workTypes.length>500||workTypes.some(v=>typeof v!=='string'||!v.trim()||v.length>100||/[\x00-\x1f]/.test(v))||new Set(workTypes.map(normalized)).size!==workTypes.length)throw new AppError('중복 없이 작업명을 1~500개 입력하세요.');await client.rpc('config_set',{workTypes});return json({workTypes});}
@@ -73,7 +74,7 @@ export async function freeGateway(request,env,fetcher=fetch){
   if(path==='/api/revoke'){admin();await client.rpc('sessions_revoke',{all:true});return json({ok:true});}
   if(path==='/api/worker-password'){admin();const {password}=await readJson(request);if(typeof password!=='string'||password.length<12||password.length>128)throw new AppError('비밀번호는 12~128자로 입력하세요.');await client.request(`/auth/v1/admin/users/${env.WORKER_USER_ID}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});await client.rpc('sessions_revoke',{all:false});return json({ok:true});}
   if(path==='/api/maintenance'&&request.method==='GET'){admin();return json(await client.maintenanceRpc('status'));}
-  if(path.startsWith('/api/references')||path==='/api/ai-usage'||path==='/api/ai-status')return await referenceRoute({path,request,client,admin,readJson,body,json,env,fetcher});
+  if(path.startsWith('/api/references')||path==='/api/ai-usage'||path==='/api/ai-status'||path==='/api/learning-summary')return await referenceRoute({path,request,client,admin,readJson,body,json,env,fetcher});
   if(path==='/api/jobs'){
    if(request.method==='GET')return json(await client.rpc('jobs_list',{deviceHash:await hash(jar.np_device)}));
    const id=crypto.randomUUID(),args=await access(jar.np_device,id);return json(clientJob(await client.rpc('job_create',args)));
@@ -84,6 +85,7 @@ export async function freeGateway(request,env,fetcher=fetch){
    const files=await client.rpc('job_delete',args);try{await storageDelete(client,files);await client.rpc('cleanup_list');}catch{throw new AppError('삭제가 지연되고 있습니다. 저장 완료를 다시 누르면 재시도합니다. 정기 정리에서도 다시 처리합니다.',503);}return json({ok:true});
   }
   const job=await client.rpc('job_get',args);
+  if(action==='learn')return await learningRoute({request,client,job,photoId,cfg,body,json});
   if(!action)return json(clientJob(url.searchParams.get('touch')==='1'?await client.rpc('job_touch',args):job));
   if(action==='source'&&request.method==='POST')return await upload(request,client,args,job,photoId,false);
   if(action==='result-upload'&&request.method==='POST')return await upload(request,client,args,job,photoId,true);
