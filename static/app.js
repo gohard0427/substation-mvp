@@ -3,7 +3,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 const normalized = value => String(value || '').replace(/\s+/g, '').toLowerCase();
 const stateNames = {uploaded:'확인 중', analysis_queued:'AI 분석 대기', analysing:'AI 분석 중', queued:'생성 대기 중', generating:'명판 생성 중', ready:'다운로드 가능', failed:'생성 실패', deleting:'사진 삭제 중'};
 let job, settings, poll, autosave, browserEngine, stopRequested = false, busy = false, blocked = false;
-let editEpoch = 0, savedEpoch = 0, queue = Promise.resolve();
+let editEpoch = 0, savedEpoch = 0, queue = Promise.resolve(), photoFilter = 'all';
 let noticeTimer;
 function notice(message, duration = 0) {
   clearTimeout(noticeTimer);
@@ -118,6 +118,7 @@ dropZone.ondrop=event=>{
 window.addEventListener('dragover',event=>{if(fileDrag(event))event.preventDefault();});
 window.addEventListener('drop',event=>{if(fileDrag(event)){event.preventDefault();dropZone.classList.remove('drag-over');notice('사진·ZIP 업로드 영역에 파일을 놓아 주세요.');}});
 function open(value) {
+  if(job?.id!==value.id)photoFilter='all';
   clearTimeout(autosave); clearTimeout(poll); browserEngine?.clearPreviews();
   job = value; editEpoch = savedEpoch = 0; blocked = false;
   $('#editor').hidden = false;
@@ -145,6 +146,14 @@ function open(value) {
   update();
   if (!browserEngine && ['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll();
 }
+function needsConfirmation(photo) {return !photo.excluded && statusFor(photo)!=='확인 완료';}
+function scrollToReviewPhoto() {
+  const first=document.querySelector('#photos [data-id]:not([hidden])');
+  (first||document.querySelector('#reviewEmpty'))?.scrollIntoView({block:'start'});
+}
+for(const [id,filter] of [['showAllPhotos','all'],['showPendingPhotos','pending']]) {
+  $('#'+id).onclick=()=>{photoFilter=filter;update();scrollToReviewPhoto();};
+}
 function onPhotoInput(event) {
   const card = event.target.closest('[data-id]'); if (!card) return;
   const photo = job.photos.find(p => p.id === card.dataset.id);
@@ -163,6 +172,7 @@ function onPhotoInput(event) {
   }
   if (key !== 'confirmed' && key !== 'excluded') { photo.confirmed = false; card.querySelector('[data-key="confirmed"]').checked = false; }
   markDirty(); update();
+  if(key==='confirmed'&&photoFilter==='pending'&&card.hidden)scrollToReviewPhoto();
 }
 function markDirty() {
   editEpoch++; job.state = 'uploaded'; job.error = '';
@@ -185,6 +195,12 @@ function update() {
   const counts = {};
   for (const photo of job.photos) { const status = statusFor(photo); counts[status] = (counts[status] || 0) + 1; }
   const selected = job.photos.filter(p => !p.excluded);
+  const pending=selected.filter(needsConfirmation).length;
+  $('#showAllPhotos').textContent=`전체 ${job.photos.length}`;
+  $('#showPendingPhotos').textContent=`미확정 ${pending}`;
+  $('#showAllPhotos').setAttribute('aria-pressed',String(photoFilter==='all'));
+  $('#showPendingPhotos').setAttribute('aria-pressed',String(photoFilter==='pending'));
+  $('#reviewEmpty').hidden=photoFilter!=='pending'||pending>0;
   $('#count').textContent = `확인 ${counts['확인 완료'] || 0} / ${selected.length}`;
   $('#reviewSummary').textContent = Object.entries(counts).map(([name,count]) => `${name} ${count}장`).join(' · ');
   const locked = busy || ['analysis_queued','analysing','queued','generating'].includes(job.state);
@@ -205,6 +221,7 @@ function update() {
   $('#dateDownloads').innerHTML = dates.map(date => `<a class="button secondary" href="/api/jobs/${job.id}/download?date=${encodeURIComponent(date)}" download="${esc(date)}_작업사진.zip">${esc(date)} ZIP ↓</a>`).join('');
   for (const card of document.querySelectorAll('[data-id]')) {
     const photo = job.photos.find(p => p.id === card.dataset.id);
+    card.hidden=photoFilter==='pending'&&!needsConfirmation(photo);
     const ready = job.state === 'ready' && !photo.excluded;
     const workInput=card.querySelector('[data-key="work"]');if(document.activeElement!==workInput)workInput.value=photo.work||'';
     const typeInput=card.querySelector('[data-key="equipmentType"]');if(document.activeElement!==typeInput)typeInput.value=photo.equipmentType||'';

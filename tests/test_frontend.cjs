@@ -5,7 +5,7 @@ const fs = require('node:fs');
 function harness() {
   const elements = new Map();
   const context = vm.createContext({
-    document: {querySelector: id => { if (!elements.has(id)) elements.set(id, {replaceChildren() {}}); return elements.get(id); }, querySelectorAll: () => []},
+    document: {querySelector: id => { if (!elements.has(id)) elements.set(id, {replaceChildren() {},setAttribute() {}}); return elements.get(id); }, querySelectorAll: () => []},
     window: {addEventListener() {}}, setTimeout() { return 1; }, clearTimeout() {},
     fetch: async () => { throw Error('not logged in'); }, console,
   });
@@ -65,4 +65,12 @@ test('recommendations fill only blank ordinary work and never confirm ambiguity 
  assert.equal(evaluate('!!job.photos[0].confirmed'),false);
  assert.equal(evaluate('job.photos[1].work'),'');
  assert.equal(evaluate('job.photos[2].work'),'직접 수정');
+});
+
+test('pending review excludes confirmed and excluded photos but includes incomplete confirmations',()=>{
+ const {evaluate}=harness();
+ assert.equal(evaluate('needsConfirmation(job.photos[0])'),true);
+ evaluate('job.photos[0].confirmed=true');assert.equal(evaluate('needsConfirmation(job.photos[0])'),false);
+ evaluate("job.photos[0].location=''");assert.equal(evaluate('needsConfirmation(job.photos[0])'),true);
+ evaluate('job.photos[0].excluded=true');assert.equal(evaluate('needsConfirmation(job.photos[0])'),false);
 });
