@@ -70,7 +70,7 @@ test('admin connection probe sends no photos and performs no billable inference'
 });
 
 test('only admin can change daily trial calls; total trial cap stays independent',async()=>{
- const isolated=await backend();try{const worker=isolated.client(),admin=isolated.client();await worker.login();await admin.login('admin');assert.equal((await worker.request('/api/settings',{aiDailyLimit:100})).status,403);assert.equal((await admin.request('/api/settings',{aiDailyLimit:101})).status,400);const saved=await admin.request('/api/settings',{aiDailyLimit:100});assert.equal(saved.status,200);const settings=await(await worker.request('/api/settings')).json();assert.equal(settings.aiDailyLimit,100);assert.equal(settings.aiTotalLimit,100);}finally{await isolated.db.close();}
+ const isolated=await backend();try{const worker=isolated.client(),admin=isolated.client();await worker.login();await admin.login('admin');assert.equal((await worker.request('/api/settings',{aiDailyLimit:100})).status,403);assert.equal((await admin.request('/api/settings',{aiDailyLimit:201})).status,400);const saved=await admin.request('/api/settings',{aiDailyLimit:100});assert.equal(saved.status,200);const settings=await(await worker.request('/api/settings')).json();assert.equal(settings.aiDailyLimit,100);assert.equal(settings.aiTotalLimit,10000);}finally{await isolated.db.close();}
 });
 
 test('reference selection balances distinct work types instead of repeating the dominant class',()=>{
@@ -81,4 +81,19 @@ test('reference selection balances distinct work types instead of repeating the 
 test('an unsupported model ambiguity ID cannot turn a generic tester into PMA equipment',async()=>{
  const cfg=await b.rpc('config_get');const generic=validateResult({...result,equipmentType:'GIS',ambiguityGroupId:'pma-measurement'},cfg.workTypes,cfg.ambiguityGroups);assert.equal(generic.ambiguityGroupId,null);
  assert.equal(validateResult({...result,equipmentType:'GIS'},cfg.workTypes,cfg.ambiguityGroups,'PMA GIS').ambiguityGroupId,'pma-measurement');
+});
+
+test('100 historical calls no longer block analysis; budget blocks new calls but allows cache',async()=>{
+ const isolated=await backend({visionResult:result});try{
+ isolated.env.AI_ENABLED='true';isolated.env.OPENAI_API_KEY='test-only-ai-key';
+ await isolated.db.exec("insert into np_ai_runs(job_id,photo_id,signature,status,usage,created_at) select gen_random_uuid(),'old','old','complete','{\"input_tokens\":100,\"output_tokens\":30}'::jsonb,now()-interval '25 hours' from generate_series(1,100)");
+ const c=isolated.client();await c.login();let job=await(await c.request('/api/jobs',{})).json();const id='8'.repeat(24);
+ job=await(await c.request(`/api/jobs/${job.id}/source/${id}`,jpeg(),{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:'photo.jpg',hash:'8'.repeat(64)})),'X-Revision':String(job.revision)})).json();
+ const request=()=>c.request(`/api/jobs/${job.id}/analyse/${id}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});
+ let response=await request();assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(isolated.externalCalls.length,1);
+ await isolated.db.exec("insert into np_ai_runs(job_id,photo_id,signature,status,usage,created_at) values(gen_random_uuid(),'cost','cost','complete','{\"input_tokens\":20000000,\"output_tokens\":0}'::jsonb,now()-interval '25 hours')");
+ response=await request();assert.equal(response.status,200);job=await response.json();assert.equal(isolated.externalCalls.length,1);
+ job.photos[0].rotation=1;job=await(await c.request(`/api/jobs/${job.id}/save`,{revision:job.revision,photos:job.photos})).json();
+ response=await request();assert.equal(response.status,429);assert.match((await response.json()).error,/예산/);assert.equal(isolated.externalCalls.length,1);
+ }finally{await isolated.db.close();}
 });

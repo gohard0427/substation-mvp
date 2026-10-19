@@ -48,7 +48,7 @@ async function boot() {
   $('#extraProjects').value = (settings.projects||[]).filter(v=>v!==settings.project).join('\n');
   $('#workTypes').value = settings.workTypes.join('\n');
   $('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join('');
-  $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회 · 전체 시험 최대 ${settings.aiTotalLimit||100}회. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
+  $('#aiInfo').textContent = settings.aiConfigured ? `AI 연결 설정됨 · ${settings.aiModel} · 최근 24시간 최대 ${settings.aiDailyLimit}회 · 시험 예산 추정 한도 ${(settings.aiBudgetKrw||30000).toLocaleString()}원. 추천은 반드시 직접 확인하세요.` : 'AI 미연결 · 현재는 직접 입력할 수 있습니다. 서버에 API 키를 설정하면 추천을 요청할 수 있습니다.';
   $('#login').hidden = true;$('#logout').hidden=!browserEngine;$('#project').readOnly=!!browserEngine;$('#extraProjects').closest('label').hidden=!browserEngine;$('#jobProjectPanel').hidden=!browserEngine;$('#referenceAdminPanel').hidden=!browserEngine;
   $('#workspace').hidden = false;
   $('#admin').hidden = settings.role !== 'admin';
