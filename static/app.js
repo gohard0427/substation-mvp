@@ -12,7 +12,7 @@ function scheduleLearning(id=job?.id){
 }
 async function syncLearning(){
  clearTimeout(learningTimer);if(learningPromise)return learningPromise;
- learningPromise=(async()=>{while(learningJobs.size){const id=learningJobs.values().next().value;learningJobs.delete(id);try{await browserEngine.learnConfirmed({id},api,message=>{$('#learningStatus').textContent=message;});}catch(e){if([403,404,410].includes(e.status))continue;learningJobs.add(id);throw e;}}})();
+ learningPromise=(async()=>{while(learningJobs.size){const id=learningJobs.values().next().value;learningJobs.delete(id);try{await browserEngine.learnConfirmed({id},api,message=>{$('#learningStatus').textContent=message.includes('한도')||message.includes('큰')?message:'';});}catch(e){if([403,404,410].includes(e.status))continue;learningJobs.add(id);throw e;}}})();
  try{await learningPromise;}finally{learningPromise=null;}
 }
 function notice(message, duration = 0) {
@@ -105,7 +105,7 @@ async function uploadSelectedFiles(files) {
   if(busy){notice('현재 작업이 끝난 뒤 파일을 추가해 주세요.');return;}busy=true;update();
   try {
     await flush();
-    if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles(files,api,notice)); await list(); notice('업로드 완료. 서버에 작업용 사본과 진행 상태를 저장했습니다.'); if(settings.aiConfigured) await analyseCurrent(); else notice('업로드 완료 · AI가 연결되지 않아 직접 입력이 필요합니다.'); } finally { busy = false; update(); } return; }
+    if (browserEngine) { busy = true; update(); try { open(await browserEngine.uploadFiles(files,api,notice)); await list(); notice('업로드 완료.'); if(settings.aiConfigured) await analyseCurrent(); else notice('업로드 완료 · AI가 연결되지 않아 직접 입력이 필요합니다.'); } finally { busy = false; update(); } return; }
     for (const file of files) {
       notice(`${file.name} 업로드 및 폴더 분석 중…`);
       const r = await fetch('/api/upload', {method:'POST', headers:{'X-Filename':encodeURIComponent(file.name)}, body:file});
@@ -221,6 +221,7 @@ function update() {
   const locked = busy || ['analysis_queued','analysing','queued','generating'].includes(job.state);
   $('#analyse').disabled = locked || blocked || !settings.aiConfigured || !selected.length;
   $('#jobProjectSelect').disabled=locked||blocked;$('#jobProjectCustom').disabled=locked||blocked;
+  $('#generate').textContent=job.state==='ready'?'명판 다시 생성':'명판 생성';
   $('#generate').disabled = !job.project?.trim() || job.state === 'deleting' || locked || blocked || !selected.length || selected.some(p => !p.confirmed || !resolved(p) || ['date','location','equipment','work'].some(k => !p[k]?.trim()));
   $('#save').disabled = locked || blocked;
   $('#applyBatch').disabled = locked || blocked;
@@ -251,12 +252,12 @@ function update() {
     card.querySelector('[data-preview-label]').textContent = ready ? '명판 합성 결과' : '방향 보정 미리보기';
     const result = photo.analysisStatus === 'complete' ? photo.recommendation?.result : null;
     const olderResult=result&&settings.aiPromptVersion&&result.analysisVersion!==settings.aiPromptVersion;
-    card.querySelector('[data-recommendations]').innerHTML = result ? `${olderResult?'<p class="alert">이전 분석 기준의 추천입니다. 사진별 AI 추천을 다시 요청해 주세요.</p>':''}<strong>AI 추천 · 직접 확인 필요</strong><p class="muted">${result.observations.map(esc).join(' · ')}</p>${result.candidates.map(candidate => `<button type="button" class="secondary" data-candidate="${esc(candidate.work)}" ${locked || blocked ? 'disabled' : ''}>${esc(candidate.work)}</button><p class="muted">${esc(candidate.reason)}</p>`).join('')}${result.candidates.length ? '' : '<p>사진만으로 추천할 수 없습니다. 직접 입력하세요.</p>'}` : `<p class="muted">${esc(photo.analysisError || (photo.analysisStatus === 'stale' ? '방향 또는 설비 정보가 바뀌어 AI 추천을 다시 요청해야 합니다.' : '사진별 AI 추천을 요청하거나 직접 입력하세요.'))}</p>`;
+    card.querySelector('[data-recommendations]').innerHTML = result ? `${olderResult?'<p class="muted">이전 추천 · 재분석 가능</p>':''}<strong>AI 추천</strong><div class="candidate-buttons">${result.candidates.map(candidate => `<button type="button" class="secondary" data-candidate="${esc(candidate.work)}" ${locked || blocked ? 'disabled' : ''}>${esc(candidate.work)}</button>`).join('')}</div>${result.candidates.length?'':'<p class="muted">직접 입력해 주세요.</p>'}<details class="ai-explanation"><summary>추천 근거</summary><p>${result.observations.map(esc).join(' · ')}</p>${result.candidates.map(candidate=>`<p><strong>${esc(candidate.work)}</strong> · ${esc(candidate.reason)}</p>`).join('')}</details>` : `<p class="muted">${esc(photo.analysisError || (photo.analysisStatus==='stale'?'재분석 필요':'직접 입력 가능'))}</p>`;
     card.querySelector('[data-status]').textContent = statusFor(photo) + (photo.generationError ? ': ' + photo.generationError : '');
     const group = groupFor(photo), panel = card.querySelector('[data-ambiguity]'), choice = card.querySelector('[data-choice]');
     panel.hidden = !group || photo.excluded;
     if (group) {
-      card.querySelector('[data-reason]').textContent = `${group.name}: ${group.reason}. AI 점수와 관계없이 직접 선택해야 합니다.`;
+      card.querySelector('[data-reason]').textContent = '작업 내용을 직접 선택하세요.';
       const signature = JSON.stringify(group);
       if (choice.dataset.signature !== signature) {
         choice.innerHTML = '<option value="">작업을 선택하세요</option>' + group.options.map(option => `<option value="${esc(option)}">${esc(option)}</option>`).join('') + '<option value="__other__">기타 — 직접 입력</option>';
@@ -267,7 +268,8 @@ function update() {
     for (const input of card.querySelectorAll('input,select')) input.disabled = locked || blocked || job.state === 'deleting';
   }
   renderFreeDownloads();
-  $('#progress').textContent = job.state === 'deleting' ? '서버 사진을 정리 중입니다. 저장 완료를 누르면 삭제를 다시 시도합니다.' : browserEngine && job.state === 'generating' ? `이 기기에서 명판 생성 중 ${job.progress || 0}장 완료 · 화면을 닫으면 중지되며 다시 불러와 이어갈 수 있습니다.` : blocked ? '저장 충돌: 작업을 다시 불러오세요.' : job.state === 'analysis_queued' ? 'AI 분석 대기 중 · 서버에서 계속 처리합니다.' : job.state === 'analysing' ? `AI 분석 중 ${job.analysisProgress || 0}장 완료` : job.state === 'queued' ? '생성 대기 중 · 브라우저를 닫아도 이어집니다.' : job.state === 'generating' ? `명판 생성 중 ${job.progress || 0}장 완료` : job.state === 'ready' ? '생성 완료. 다운로드 후 저장 완료를 눌러 주세요.' : job.error || (editEpoch !== savedEpoch ? '저장 중 · 이 화면을 유지해 주세요.' : '진행 상태가 서버에 저장되어 있습니다.');
+  $('#progress').textContent = job.state==='deleting'?'사진 삭제 중':blocked?'저장 충돌 · 다시 불러오세요':['generating','queued'].includes(job.state)?`명판 생성 ${job.progress||0}/${selected.length}`:['analysis_queued','analysing'].includes(job.state)?'AI 분석 중':job.state==='ready'?'생성 완료':job.error||(editEpoch!==savedEpoch?'저장 중':'자동 저장됨');
+
 }
 function persist() {
   clearTimeout(autosave);
@@ -334,8 +336,8 @@ async function analyseCurrent() {
 $('#analyse').onclick = run(async () => exclusive(analyseCurrent));
 $('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (browserEngine) await browserGenerate(); else if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
 $('#finish').onclick = run(async () => {
-  if (!confirm('ZIP을 휴대폰 또는 PC에 저장했나요? 원본·완성 사진은 삭제하고 확정 기록과 참고용 사본은 유지합니다.')) return;
-  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`, {}); browserEngine?.clearPreviews(); job = null; $('#editor').hidden = true; await list(); notice('임시 사진과 결과물을 삭제했습니다.'); });
+  if (!confirm('사진을 기기에 저장했나요?\n서버의 원본·완성 사진을 삭제합니다. 복구할 수 없습니다.\n확정 기록과 참고 사본은 유지합니다.')) return;
+  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`, {}); browserEngine?.clearPreviews(); job = null; $('#editor').hidden = true; await list(); notice('작업을 종료했습니다.',2000); });
 });
 window.addEventListener('beforeunload', event => { if (editEpoch !== savedEpoch && job) { event.preventDefault(); event.returnValue = ''; } });
 function renderGroups() {
@@ -386,7 +388,7 @@ function renderFreeDownloads() {
       button.onclick = run(async () => exclusive(async () => {
         const blob = await browserEngine.downloadZip(job,entries,notice);
         browserEngine.saveBlob(blob,`${date || '전체'}_작업사진${plans.length>1?'_'+(index+1):''}.zip`);
-        notice('다운로드를 요청했습니다. 모든 ZIP의 실제 저장을 확인한 후 저장 완료를 눌러 주세요.');
+        notice('다운로드 요청 완료 · 저장 후 작업을 종료하세요.');
       })); container.append(button);
     });
   }

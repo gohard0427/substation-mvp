@@ -1,6 +1,6 @@
 import {checkZipDirectory,zipEntryPath} from '../shared/zip-safety.mjs';
 import {ZipReader,ZipWriter,BlobReader,BlobWriter} from '@zip.js/zip.js';
-import {LIMITS,PROFILE,safePath,hash,outputPaths,validateImage} from '../shared/free-model.mjs';
+import {LIMITS,PROFILE,safePath,hash,outputPaths,validateImage,formatStationName} from '../shared/free-model.mjs';
 const placeholder='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="640" height="480"%3E%3Crect width="100%25" height="100%25" fill="%23e9eeea"/%3E%3C/svg%3E';
 async function checked(response){if(!response.ok){let value={};try{value=await response.json();}catch{}const error=Error(value.error||'사진 처리 요청이 실패했습니다.');error.status=response.status;throw error;}return response;}
 function canvas(width,height){const el=document.createElement('canvas');el.width=width;el.height=height;return el;}
@@ -24,7 +24,7 @@ export async function renderPhoto(blob,photo,project,{plate=true,maxWidth=1280,q
    if(width<320)throw Error('사진 해상도가 너무 작습니다. 더 큰 원본을 선택하세요.');
    const pw=Math.round(width*PROFILE.width),ph=Math.round(height*PROFILE.height),col=Math.round(width*PROFILE.label),x=width-pw,y=height-ph;
    ctx.fillStyle='white';ctx.fillRect(x,y,pw,ph);ctx.strokeStyle='#222';ctx.lineWidth=1;
-   const rows=[['공사명',project],['위 치',photo.location],['기기명',photo.equipment],['내 용',photo.work],['일 자',photo.date.replaceAll('-','.')]];
+   const rows=[['공사명',project],['위 치',formatStationName(photo.location)],['기기명',photo.equipment],['내 용',photo.work],['일 자',photo.date.replaceAll('-','.')]];
    for(let i=0;i<5;i++){
     const top=y+Math.round(ph*i/5),bottom=y+Math.round(ph*(i+1)/5);
     ctx.beginPath();ctx.moveTo(x,top+.5);ctx.lineTo(width,top+.5);ctx.stroke();
@@ -178,7 +178,7 @@ export async function analyse(job,api,progress,{analysisVersion}={}){
    const photo=job.photos.find(v=>v.id===p.id);const source=await (await checked(await fetch(`/api/jobs/${job.id}/image/${photo.id}`))).blob();const analysis=await prepareAnalysis(source,photo);
    const response=await checked(await fetch(`/api/jobs/${job.id}/analyse/${photo.id}`,{method:'POST',headers:{'X-Visual-Signature':JSON.stringify(analysis.values)},body:analysis.blob}));job=await response.json();for(const [id,message] of failures){const failed=job.photos.find(v=>v.id===id);if(failed){failed.analysisStatus='failed';failed.analysisError=message;}}done++;progress(job);
    }catch(error){if([401,403,409,429,503].includes(error.status))throw error;failures.set(p.id,error.message);const failed=job.photos.find(v=>v.id===p.id);failed.analysisStatus='failed';failed.analysisError=error.message;progress(job);}
-  }progress(job,failures.size?`AI 분석 완료 · 실패 ${failures.size}장. 다시 요청하면 미완료 사진만 재시도합니다.`:`AI 분석 완료 · ${done}장. 사진별 후보를 확인하고 내용을 확정하세요.`);return job;
+  }progress(job,failures.size?`AI 분석 완료 · 실패 ${failures.size}장`:`AI 분석 완료 · ${done}장`);return job;
  }finally{previewsPaused=false;drainPreviews();}
 }
 export async function referencePlatePreview(blob,mask){

@@ -1,7 +1,7 @@
 export const DEFAULT_PROJECT='2026~2026년도 시흥전력지사 변전협력회사 총액공사';
 export class ValidationError extends Error {}
 export const LIMITS={photos:200,source:8*1024*1024,result:2*1024*1024,zip:500*1024*1024,expanded:1024*1024*1024,pixels:20_000_000,storage:700*1024*1024};
-export const PROFILE={width:911/2048,height:336/1536,label:132/2048,font:50/2048,padding:12/2048,version:'sample-profile-browser-v1'};
+export const PROFILE={width:911/2048,height:336/1536,label:132/2048,font:50/2048,padding:12/2048,version:'sample-profile-browser-v2-station-ss'};
 export const normalized=value=>String(value||'').replace(/\s+/g,'').toLowerCase();
 export function safePath(value){
  if(typeof value!=='string'||value.length>512||/[\x00-\x1f:]/.test(value))throw new ValidationError('안전하지 않은 파일 경로입니다.');
@@ -56,3 +56,9 @@ export function imageInfo(bytes){
 }
 export function validateImage(bytes,result=false){const info=imageInfo(bytes);if(!info.width||!info.height||info.width*info.height>LIMITS.pixels)throw new ValidationError('사진은 최대 2천만 픽셀입니다.');if(result&&(info.mime!=='image/jpeg'||info.width>1280||info.height>960||info.width*3!==info.height*4))throw new ValidationError('출력은 최대 1280×960의 가로 4:3 JPEG여야 합니다.');return info;}
 export function outputPaths(photos){const used=new Set();return photos.map(p=>{const base=safePath(p.path).replace(/\.[^.\/]+$/,'.jpg');let path=base,index=1;while(used.has(path.normalize('NFC').toLowerCase()))path=base.replace(/\.jpg$/,`_${p.id}_${index++}.jpg`);used.add(path.normalize('NFC').toLowerCase());return {photo:p,path};});}
+
+export function formatStationName(value){
+ const name=String(value||'').trim();if(!name)return '';
+ if(/s\s*\/\s*s/i.test(name))return name.replace(/s\s*\/\s*s/gi,'S/S').replace(/\s*변전소\s*(?=S\/S)/g,'').replace(/\s+(?=S\/S)/g,'').replace(/(?:S\/S\s*)+$/,'S/S');
+ return name.replace(/\s*변전소$/,'').trim()+'S/S';
+}
