@@ -27,11 +27,11 @@ test('disabled AI makes no external call; enabled per-photo analysis is cached a
  let response=await c.request(`/api/jobs/${job.id}/analyse/${photoId}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});assert.equal(response.status,503);assert.equal(b.externalCalls.length,0);
  b.env.AI_ENABLED='true';b.env.OPENAI_API_KEY='test-only-ai-key';b.env.AI_DAILY_LIMIT='1';
  response=await c.request(`/api/jobs/${job.id}/analyse/${photoId}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});assert.equal(response.status,200,await response.clone().text());job=await response.json();
- assert.equal(job.photos[0].confirmed,false);assert.equal(job.photos[0].work,'');assert.equal(job.photos[0].recommendation.result.ambiguityGroupId,'pma-measurement');assert.equal(b.externalCalls.length,1);assert.equal(b.externalCalls[0].store,false);
- response=await c.request(`/api/jobs/${job.id}/analyse/${photoId}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(b.externalCalls.length,1);
+ assert.equal(job.photos[0].confirmed,false);assert.equal(job.photos[0].work,'');assert.equal(job.photos[0].recommendation.result.ambiguityGroupId,'pma-measurement');assert.equal(b.externalCalls.length,2);assert.equal(b.externalCalls[0].store,false);
+ response=await c.request(`/api/jobs/${job.id}/analyse/${photoId}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(b.externalCalls.length,2);
  job.photos[0].equipmentType='other GIS';job=await(await c.request(`/api/jobs/${job.id}/save`,{revision:job.revision,photos:job.photos})).json();
- response=await c.request(`/api/jobs/${job.id}/analyse/${photoId}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});assert.equal(response.status,429);assert.equal(b.externalCalls.length,1);
- const usage=await b.aiRpc('usage');assert.equal(usage.attempts24h,1);assert.equal(usage.inputTokens24h,100);
+ response=await c.request(`/api/jobs/${job.id}/analyse/${photoId}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});assert.equal(response.status,429);assert.equal(b.externalCalls.length,2);
+ const usage=await b.aiRpc('usage');assert.equal(usage.attempts24h,1);assert.equal(usage.providerCalls24h,2);assert.equal(usage.inputTokens24h,200);
 });
 test('cache signature changes with rotation and reviewed examples',async()=>{
  const cfg=await b.rpc('config_get'),p={hash:'x',rotation:0,equipmentType:'GIS'};const a=await analysisFingerprint(p,cfg,[reference],'test');assert.notEqual(a,await analysisFingerprint({...p,rotation:1},cfg,[reference],'test'));assert.notEqual(a,await analysisFingerprint(p,cfg,[{...reference,updated_at:'changed'}],'test'));

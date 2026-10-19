@@ -1,5 +1,5 @@
 import {AppError} from './supabase-client.mjs';
-import {signature,FEATURE_VERSION,nearest,recommend,analysisFingerprint,analysisHint,visionModel,equipmentContext,checkVisionConnection} from './vision.mjs';
+import {signature,FEATURE_VERSION,candidateReferences,recommend,analysisFingerprint,analysisHint,visionModel,equipmentContext,checkVisionConnection} from './vision.mjs';
 import {validateImage} from '../shared/free-model.mjs';
 export const REF_BUCKET='np-reference-private';
 export const aiConfigured=env=>env.AI_ENABLED==='true'&&!!env.OPENAI_API_KEY;
@@ -40,16 +40,30 @@ export async function analysePhoto({request,env,client,job,photoId,args,body,fet
  if(photo.confirmed)throw new AppError('이미 확정한 사진은 분석하지 않습니다.',409);
  const bytes=await body(request,524288);validateImage(bytes,true);
  let features;try{features=signature(JSON.parse(request.headers.get('X-Visual-Signature')));}catch{throw new AppError('분석 이미지 특징을 확인하세요.');}
- const references=await client.learningRpc('candidates'),selected=nearest(references,features,analysisHint(photo));
- const cfg=await client.rpc('config_get');const model=visionModel(env),context=equipmentContext(job,photo);if(cfg.aiTrialUnlimited!==true&&!/^gpt-5\.4-mini(?:-2026-03-17)?$/.test(model))throw new AppError('현재 시험 예산 계산은 GPT-5.4 mini 모델만 지원합니다. 관리자에게 모델 설정 확인을 요청하세요.',503);const fingerprint=await analysisFingerprint(photo,cfg,selected,model,context);
+ const references=await client.learningRpc('candidates');
+ const cfg=await client.rpc('config_get');const model=visionModel(env),context=equipmentContext(job,photo);if(cfg.aiTrialUnlimited!==true&&!/^gpt-5\.4-mini(?:-2026-03-17)?$/.test(model))throw new AppError('현재 시험 예산 계산은 GPT-5.4 mini 모델만 지원합니다. 관리자에게 모델 설정 확인을 요청하세요.',503);
+ // Entire eligible pool changes invalidate the cache, even when a color neighbour is unchanged.
+ const fingerprint=await analysisFingerprint(photo,cfg,references,model,context);
  const claim=await client.aiRpc('analysis_claim',{...args,jobId:job.id,photoId,signature:fingerprint,revision:job.revision,limit:dailyLimit(env,cfg),totalLimit:totalLimit(env,cfg)});
  let result,usage;
  try{
   if(claim.cached){result=claim.run.result;usage=claim.run.usage;}
   else{
-   const examples=[];for(const ref of selected){const response=await client.request(`/storage/v1/object/${REF_BUCKET}/${ref.object_path}`);const image=new Uint8Array(await response.arrayBuffer());if(image.length>1048576)throw new AppError('참고 사진 용량이 올바르지 않습니다.');examples.push({...ref,bytes:image});}
+   const workPhoto={...photo,equipmentType:analysisHint(photo)};
+   ({result,usage}=await recommend({env,image:bytes,photo:workPhoto,works:cfg.workTypes,groups:cfg.ambiguityGroups,references:[],context,fetcher}));
+   const selected=candidateReferences(references,features,analysisHint(photo),result.candidates).filter(r=>cfg.workTypes.some(w=>w.replace(/\s/g,'')===r.label.work.replace(/\s/g,'')));
+   if(selected.length){
+    // Preserve the successful first pass and known usage before an optional comparison.
+    await client.aiRpc('analysis_checkpoint',{runId:claim.run.id,result,usage});
+    try{
+     const examples=[];for(const ref of selected){const response=await client.request(`/storage/v1/object/${REF_BUCKET}/${ref.object_path}`);const image=new Uint8Array(await response.arrayBuffer());if(image.length>1048576)throw new AppError('참고 사진 용량이 올바르지 않습니다.');examples.push({...ref,bytes:image});}
+     usage={...usage,api_calls:(usage.api_calls||1)+1};
+     await client.aiRpc('analysis_checkpoint',{runId:claim.run.id,result,usage});
+     const compared=await recommend({env,image:bytes,photo:workPhoto,works:cfg.workTypes,groups:cfg.ambiguityGroups,references:examples,context,initial:result,fetcher});
+     usage={input_tokens:usage.input_tokens+compared.usage.input_tokens,output_tokens:usage.output_tokens+compared.usage.output_tokens,api_calls:usage.api_calls};result={...compared.result,referenceComparison:'complete'};
+    }catch(error){if(error.usage)usage={...usage,input_tokens:usage.input_tokens+error.usage.input_tokens,output_tokens:usage.output_tokens+error.usage.output_tokens};result={...result,referenceComparison:'unavailable',observations:[...result.observations.slice(0,7),'참고 사례 비교를 완료하지 못해 1차 관찰 결과를 표시합니다.']};}
+   }else result={...result,referenceComparison:'no-matching-reference'};
 
-   ({result,usage}=await recommend({env,image:bytes,photo:{...photo,equipmentType:analysisHint(photo)},works:cfg.workTypes,groups:cfg.ambiguityGroups,references:examples,context,fetcher}));
   }
   const committed=await client.aiRpc('analysis_commit',{...args,revision:job.revision,runId:claim.run.id,result,usage});if(committed.stale)throw new AppError('분석 중 사진 정보가 변경되었습니다. 다시 불러온 뒤 요청하세요.',409);
  }catch(error){if(!claim.cached)await client.aiRpc('analysis_fail',{runId:claim.run.id});throw error;}

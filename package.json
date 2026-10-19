@@ -16,10 +16,11 @@
     "test:maintenance": "node tests/test_maintenance.mjs",
     "test:zip": "node tests/test_zip_safety.mjs",
     "test:e2e": "npm run build && node tests/test_e2e.mjs",
-    "test:audit": "npm run test:free && npm run test:ai && npm run test:maintenance && npm run test:zip && npm test && npm run test:browser && node tests/test_e2e.mjs && npm run test:learning && npm run test:station",
+    "test:audit": "npm run test:free && npm run test:ai && npm run test:maintenance && npm run test:zip && npm test && npm run test:browser && node tests/test_e2e.mjs && npm run test:learning && npm run test:station && npm run test:work-audit",
     "test:reference-import": "node tests/test_reference_import.mjs",
     "test:learning": "node tests/test_learning.mjs",
-    "test:station": "node tests/test_station_name.mjs"
+    "test:station": "node tests/test_station_name.mjs",
+    "test:work-audit": "node tests/test_work_audit.mjs"
   },
   "engines": {
     "node": ">=22"

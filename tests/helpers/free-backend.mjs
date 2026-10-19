@@ -1,13 +1,15 @@
 import {PGlite} from '@electric-sql/pglite';
 import {readFile} from 'node:fs/promises';
 import {freeGateway} from '../../cloudflare/free-api.mjs';
-export async function backend({visionResult}={}){
+export async function backend({visionResult,visionResponder}={}){
  const db=new PGlite();await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');await db.exec(await readFile('supabase/migrations/001_free_mvp.sql','utf8'));
  await db.exec(await readFile('supabase/schema/ai-reference.sql','utf8'));await db.exec(await readFile('supabase/schema/ai-trial-limit.sql','utf8'));await db.exec(await readFile('supabase/schema/maintenance.sql','utf8'));
  await db.exec(await readFile('supabase/schema/upload-limits.sql','utf8'));
  await db.exec(await readFile('supabase/schema/ai-budget-limit.sql','utf8'));
  await db.exec(await readFile('supabase/schema/ai-unlimited-trial.sql','utf8'));
  await db.exec(await readFile('supabase/schema/worker-learning.sql','utf8'));
+ await db.exec(await readFile('supabase/schema/reference-work-audit.sql','utf8'));
+ await db.exec(await readFile('supabase/schema/project-name-2026-2027.sql','utf8'));
  const learningRpc=async(action,data={})=>(await db.query('select public.np_learning_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
  const maintenanceRpc=async(action,data={})=>(await db.query('select public.np_maintenance_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
  const aiRpc=async(action,data={})=>(await db.query('select public.np_ai_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
@@ -16,7 +18,7 @@ export async function backend({visionResult}={}){
  const rpc=async(action,data={})=>(await db.query('select public.np_rpc($1,$2::jsonb) as data',[action,JSON.stringify(data)])).rows[0].data;
  async function fetcher(url,options={}){
   const path=new URL(url).pathname,headers=new Headers(options.headers);
-  if(new URL(url).hostname==='api.openai.com'){externalCalls.push(JSON.parse(options.body));return Response.json({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(visionResult)}]}],usage:{input_tokens:100,output_tokens:30}});}
+  if(new URL(url).hostname==='api.openai.com'){externalCalls.push(JSON.parse(options.body));if(visionResponder)return visionResponder(externalCalls.length,externalCalls.at(-1));return Response.json({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(visionResult)}]}],usage:{input_tokens:100,output_tokens:30}});}
   if(path==='/auth/v1/token'){
    const input=JSON.parse(options.body),role=input.email.startsWith('admin')?'ADMIN':'WORKER';
    if(input.password!=='test-only-password')return Response.json({error:'invalid credentials'},{status:400});return Response.json({user:{id:env[role+'_USER_ID']},access_token:'never-exposed',refresh_token:'never-exposed'});
