@@ -29,11 +29,20 @@ export async function renderPhoto(blob,photo,project,{plate=true,maxWidth=1280,q
     const top=y+Math.round(ph*i/5),bottom=y+Math.round(ph*(i+1)/5);
     ctx.beginPath();ctx.moveTo(x,top+.5);ctx.lineTo(width,top+.5);ctx.stroke();
     for(const [value,left,cellWidth] of [[rows[i][0],x,col],[rows[i][1],x+col,pw-col]]){
-     const text=String(value),padding=Math.max(3,Math.round(width*PROFILE.padding));let size=Math.round(width*PROFILE.font);
-     ctx.font=`700 ${size}px "Noto Sans KR"`;while(ctx.measureText(text).width>cellWidth-padding*2&&size>6){size--;ctx.font=`700 ${size}px "Noto Sans KR"`;}
-     if(ctx.measureText(text).width>cellWidth-padding*2)throw Error('명판 문구가 너무 깁니다. 줄인 뒤 다시 생성하세요.');
-     const metrics=ctx.measureText(text);const ascent=metrics.actualBoundingBoxAscent,descent=metrics.actualBoundingBoxDescent;
-     ctx.fillStyle='#111';ctx.fillText(text,left+padding,top+(bottom-top-ascent-descent)/2+ascent);
+     const text=String(value),padding=Math.max(3,Math.round(width*PROFILE.padding)),size=Math.round(width*PROFILE.font),available=cellWidth-padding*2;
+     ctx.font=`700 ${size}px "Noto Sans KR"`;
+     const chars=Array.from(text),natural=ctx.measureText(text).width;
+     // Keep identical font size/height in all ten cells. Tighten spacing first;
+     // only remaining overflow is fitted horizontally, never vertically.
+     const spacing=natural>available&&chars.length>1?Math.max(-size*.12,(available-natural)/(chars.length-1)):0;
+     const advances=spacing?chars.map(c=>ctx.measureText(c).width):[];
+     const fitted=spacing?advances.reduce((a,b)=>a+b,0)+spacing*(chars.length-1):natural;
+     const horizontal=Math.min(1,available/Math.max(1,fitted));
+     if(horizontal<.45)throw Error('명판 문구가 너무 깁니다. 줄인 뒤 다시 생성하세요.');
+     const metrics=ctx.measureText(text),ascent=metrics.actualBoundingBoxAscent,descent=metrics.actualBoundingBoxDescent;
+     ctx.save();ctx.translate(left+padding,top+(bottom-top-ascent-descent)/2+ascent);ctx.scale(horizontal,1);ctx.fillStyle='#111';
+     if(spacing){let offset=0;chars.forEach((c,j)=>{ctx.fillText(c,offset,0);offset+=advances[j]+spacing;});}else ctx.fillText(text,0,0);
+     ctx.restore();
     }
    }
    ctx.fillStyle='#222';ctx.fillRect(x,y,1,ph);ctx.fillRect(x+col,y,1,ph);ctx.fillRect(width-1,y,1,ph);ctx.fillRect(x,height-1,pw,1);
