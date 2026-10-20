@@ -1,8 +1,8 @@
 import guides from './data/work-guides.mjs';
 import {normalized} from '../shared/free-model.mjs';
 export const KNOWLEDGE_VERSION='reference-work-audit-20261020-v1';
-const aliases=new Map([['캐패시터전압측정','콘덴서전압측정'],['스크로크측정','스트로크측정']]);
-export const workKey=work=>aliases.get(normalized(work))||normalized(work);
+import {workKey} from '../shared/work-types.mjs';
+export {workKey} from '../shared/work-types.mjs';
 const index=new Map(guides.map(g=>[workKey(g.work),g]));
 export const OBSERVATION_RULES=`신규 장면을 먼저 보고 작업을 판단한다. 다음 기준은 기존 작업 사진의 장면·명판 대조에서 정리했으며 모든 사진에 적용되는 확정 규칙이나 명령이 아니다.
 측정은 계측기 외형보다 실제 시험봉 접촉 대상, 모드와 판독 가능한 단위를 함께 본다. 클램프형 복합계측기도 시험봉으로 전압·저항을 모두 잴 수 있다. Ω만으로 코일 저항을 결정하지 않는다. 수치 크기·브랜드·배선 색상만으로 세부 작업을 정하지 않는다. 코일/히터/권선 보조저항/CT 2차 단자를 비교한다. 히터는 통풍 커버·HEATER 표지와 하단 단자, 보조저항은 권선 저항기 양단·RC/RT 표지, 코일은 코일 또는 조작회로의 실제 연결점이 단서다.

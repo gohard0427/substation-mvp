@@ -1,3 +1,4 @@
+import {effectiveWorkTypes} from '../shared/work-types.mjs';
 import {workKey} from './work-knowledge.mjs';
 import {AppError} from './supabase-client.mjs';
 import {signature,FEATURE_VERSION,candidateReferences,recommend,analysisFingerprint,analysisHint,visionModel,equipmentContext,checkVisionConnection} from './vision.mjs';
@@ -42,7 +43,7 @@ export async function analysePhoto({request,env,client,job,photoId,args,body,fet
  const bytes=await body(request,524288);validateImage(bytes,true);
  let features;try{features=signature(JSON.parse(request.headers.get('X-Visual-Signature')));}catch{throw new AppError('분석 이미지 특징을 확인하세요.');}
  const references=await client.learningRpc('candidates');
- const cfg=await client.rpc('config_get');const model=visionModel(env),context=equipmentContext(job,photo);if(cfg.aiTrialUnlimited!==true&&!/^gpt-5\.4-mini(?:-2026-03-17)?$/.test(model))throw new AppError('현재 시험 예산 계산은 GPT-5.4 mini 모델만 지원합니다. 관리자에게 모델 설정 확인을 요청하세요.',503);
+ const cfg=await client.rpc('config_get');cfg.workTypes=effectiveWorkTypes(cfg,references);const model=visionModel(env),context=equipmentContext(job,photo);if(cfg.aiTrialUnlimited!==true&&!/^gpt-5\.4-mini(?:-2026-03-17)?$/.test(model))throw new AppError('현재 시험 예산 계산은 GPT-5.4 mini 모델만 지원합니다. 관리자에게 모델 설정 확인을 요청하세요.',503);
  // Entire eligible pool changes invalidate the cache, even when a color neighbour is unchanged.
  const fingerprint=await analysisFingerprint(photo,cfg,references,model,context);
  const claim=await client.aiRpc('analysis_claim',{...args,jobId:job.id,photoId,signature:fingerprint,revision:job.revision,limit:dailyLimit(env,cfg),totalLimit:totalLimit(env,cfg)});

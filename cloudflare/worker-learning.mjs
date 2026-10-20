@@ -1,3 +1,4 @@
+import {canonicalWork} from '../shared/work-types.mjs';
 import {workKey} from './work-knowledge.mjs';
 import {AppError} from './supabase-client.mjs';
 import {validateImage,validateConfirmed,normalized} from '../shared/free-model.mjs';
@@ -13,7 +14,7 @@ export async function learningRoute({request,client,job,photoId,cfg,body,json}){
  const bytes=await body(request,262144),info=validateImage(bytes,true);if(info.width>960||info.height>720)throw new AppError('참고 사진은 최대 960×720입니다.');
  let values;try{values=signature(JSON.parse(request.headers.get('X-Visual-Signature')));}catch{throw new AppError('사진 특징을 확인하세요.');}
  const work=cfg.workTypes.find(w=>workKey(w)===workKey(photo.work));
- const args={jobId:job.id,photoId,signature:record.signature,bytes:bytes.length,path:photo.path,standardWork:work||photo.work,eligible:!!work,visualSignature:{version:FEATURE_VERSION,values}};
+ const args={jobId:job.id,photoId,signature:record.signature,bytes:bytes.length,path:photo.path,standardWork:canonicalWork(work||photo.work),eligible:!!work||cfg.autoLearnConfirmed===true,visualSignature:{version:FEATURE_VERSION,values}};
  const claim=await client.learningRpc('claim',args);if(claim.cached)return json({ok:true,reused:true,note:claim.note||''});
  const ref=claim.reference;
  try{
@@ -24,5 +25,5 @@ export async function learningRoute({request,client,job,photoId,cfg,body,json}){
   try{const abandoned=await client.learningRpc('abandon',{referenceId:ref.id,objectPath:ref.object_path});if(abandoned.abandoned)await client.request(`/storage/v1/object/${BUCKET}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefixes:[ref.object_path]})});}catch{}
   throw error;
  }
- return json({ok:true,reused:false,note:work?'':'새 작업명은 관리자 검수 후 활용합니다.'});
+ return json({ok:true,reused:false,note:work||cfg.autoLearnConfirmed===true?'':'새 작업명은 관리자 검수 후 활용합니다.'});
 }

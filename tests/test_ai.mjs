@@ -19,7 +19,7 @@ test('only admin uploads and explicitly reviewed training references are searche
 test('vision output rejects synonyms outside standards and enforces PMA choice regardless of model',async()=>{
  const cfg=await b.rpc('config_get');const checked=validateResult(result,cfg.workTypes,cfg.ambiguityGroups);assert.equal(checked.needsUserReview,true);assert.equal(checked.ambiguityGroupId,'pma-measurement');
  assert.throws(()=>validateResult({...result,candidates:[{work:'상상한 작업',reason:'없음'}]},cfg.workTypes,cfg.ambiguityGroups));
- assert.throws(()=>validateResult({...result,candidates:[result.candidates[0],result.candidates[0]]},cfg.workTypes,cfg.ambiguityGroups));
+ assert.equal(validateResult({...result,candidates:[result.candidates[0],result.candidates[0]]},cfg.workTypes,cfg.ambiguityGroups).candidates.length,1);
 });
 test('disabled AI makes no external call; enabled per-photo analysis is cached and never confirms work',async()=>{
  const c=b.client();await c.login();let job=await(await c.request('/api/jobs',{})).json();const photoId='1'.repeat(24);

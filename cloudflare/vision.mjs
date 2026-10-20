@@ -2,7 +2,7 @@ import {KNOWLEDGE_VERSION,OBSERVATION_RULES,guidanceFor,referenceEligible,eviden
 import {AppError} from './supabase-client.mjs';
 import {normalized,hash} from '../shared/free-model.mjs';
 export const DEFAULT_VISION_MODEL='gpt-5.4-mini-2026-03-17';
-export const PROMPT_VERSION='work-vision-v5-contrast';
+export const PROMPT_VERSION='work-vision-v6-aliases';
 export const visionModel=env=>env.OPENAI_VISION_MODEL||DEFAULT_VISION_MODEL;
 export function equipmentContext(job,photo){
  return job.photos.filter(p=>!p.excluded&&p.id!==photo.id&&p.group===photo.group&&(p.confirmed&&normalized(p.work)==='대상기기'||p.analysisStatus==='complete'&&p.recommendation?.result.candidates?.[0]?.work==='대상 기기')).slice(0,3).map(p=>({id:p.id,equipment:p.equipment,equipmentType:p.equipmentType,observations:p.analysisStatus==='complete'?(p.recommendation?.result.observations||[]):[],source:p.confirmed?'worker-confirmed':'ai-inferred'}));
@@ -39,7 +39,8 @@ export function candidateReferences(references,features,equipmentType,candidates
 
 export function validateResult(result,works,groups,equipmentHint=''){
  if(!result||typeof result.equipmentType!=='string'||result.equipmentType.length>100||!Array.isArray(result.candidates)||result.candidates.length>3||!Array.isArray(result.observations)||result.observations.length>8||result.observations.some(v=>typeof v!=='string'||v.length>300)||typeof result.measurementScene!=='boolean')throw new AppError('AI 응답 형식이 올바르지 않습니다.',502);
- const seen=new Set();for(const c of result.candidates){if(!works.includes(c.work)||typeof c.reason!=='string'||c.reason.length>300||seen.has(normalized(c.work)))throw new AppError('AI 작업 후보를 검증하지 못했습니다.',502);seen.add(normalized(c.work));}
+ const seen=new Set(),canonicalCandidates=[];for(const candidate of result.candidates){const c={...candidate,work:works.find(w=>workKey(w)===workKey(candidate.work))};if(!c.work||typeof c.reason!=='string'||c.reason.length>300)throw new AppError('AI 작업 후보를 검증하지 못했습니다.',502);if(!seen.has(workKey(c.work))){canonicalCandidates.push(c);seen.add(workKey(c.work));}}
+ result={...result,candidates:canonicalCandidates};
  const types=[result.equipmentType,equipmentHint].map(normalized);
  const pma=types.some(t=>t.includes('pma'))&&(result.measurementScene||result.candidates.some(c=>['코일저항측정','pma전압측정'].includes(normalized(c.work))));
  const group=groups.find(g=>g.required&&types.some(t=>t.includes(normalized(g.equipmentMatch)))&&(g.id!=='pma-measurement'||pma));

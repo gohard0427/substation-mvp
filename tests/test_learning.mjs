@@ -53,3 +53,8 @@ test('worker confirmation improves OCR drafts without overwriting reviewed or ev
   if(char==='2'){assert.equal(ref.label.work,'점검');assert.equal(ref.ocr_raw.priorDraftLabel.work,'청소');assert.equal(ref.worker_confirmed,true);}else{assert.equal(ref.label.work,'청소');assert.equal(ref.split,split);assert.equal(ref.reviewed,reviewed);}
  }
 });
+test('enabled policy learns new confirmed work and exposes canonical choices without another instruction',async()=>{
+ const {readFile}=await import('node:fs/promises');const local=await backend();try{await local.db.exec(await readFile('supabase/schema/automatic-confirmed-learning.sql','utf8'));const c=local.client();await c.login();const fresh=await confirmed(c,'9'.repeat(64),'새로운 측정 작업');assert.equal((await capture(c,fresh)).status,200);let cfg=await(await c.request('/api/settings')).json();assert.ok(cfg.workTypes.includes('새로운 측정 작업'));
+ const alias=await confirmed(c,'8'.repeat(64),'단자대 점검');assert.equal((await capture(c,alias)).status,200);cfg=await(await c.request('/api/settings')).json();assert.equal(cfg.workTypes.filter(w=>['단자 점검','단자대 점검'].includes(w)).length,1);assert.ok(cfg.workTypes.includes('단자 점검'));assert.equal(cfg.workAliases['단자대점검'],'단자 점검');assert.equal(local.externalCalls.length,0);
+ }finally{await local.db.close();}
+});

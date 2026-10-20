@@ -28,6 +28,7 @@ async function api(path, data) {
   return value;
 }
 function run(fn) { return async () => { try { await fn(); } catch (error) { notice(error.message); } }; }
+function displayCandidates(candidates=[]){const seen=new Set();return candidates.map(c=>({...c,work:settings.workAliases?.[normalized(c.work)]||settings.workTypes.find(w=>normalized(w)===normalized(c.work))||c.work})).filter(c=>{const k=normalized(c.work);if(seen.has(k))return false;seen.add(k);return true;});}
 function groupFor(photo) {
   const obvious = ['대상기기', '작업전', '작업후', '분리', '조립', '청소', '점검', '교체'];
   return settings.ambiguityGroups.find(g => g.required && (
@@ -259,7 +260,7 @@ function update() {
     card.querySelector('[data-preview-label]').textContent = ready ? '명판 합성 결과' : '방향 보정 미리보기';
     const result = photo.analysisStatus === 'complete' ? photo.recommendation?.result : null;
     const olderResult=result&&settings.aiPromptVersion&&result.analysisVersion!==settings.aiPromptVersion;
-    card.querySelector('[data-recommendations]').innerHTML = result ? `${olderResult?'<p class="muted">이전 추천 · 재분석 가능</p>':''}<strong>AI 추천</strong><div class="candidate-buttons">${result.candidates.map(candidate => `<button type="button" class="secondary" aria-pressed="${normalized(photo.work)===normalized(candidate.work)}" data-candidate="${esc(candidate.work)}" ${locked || blocked ? 'disabled' : ''}>${esc(candidate.work)}</button>`).join('')}</div>${result.candidates.length?'':'<p class="muted">직접 입력해 주세요.</p>'}<details class="ai-explanation"><summary>추천 근거</summary><p>${result.observations.map(esc).join(' · ')}</p>${result.candidates.map(candidate=>`<p><strong>${esc(candidate.work)}</strong> · ${esc(candidate.reason)}</p>`).join('')}</details>` : `<p class="muted">${esc(photo.analysisError || (photo.analysisStatus==='stale'?'재분석 필요':'직접 입력 가능'))}</p>`;
+    card.querySelector('[data-recommendations]').innerHTML = result ? `${olderResult?'<p class="muted">이전 추천 · 재분석 가능</p>':''}<strong>AI 추천</strong><div class="candidate-buttons">${displayCandidates(result.candidates).map(candidate => `<button type="button" class="secondary" aria-pressed="${normalized(photo.work)===normalized(candidate.work)}" data-candidate="${esc(candidate.work)}" ${locked || blocked ? 'disabled' : ''}>${esc(candidate.work)}</button>`).join('')}</div>${result.candidates.length?'':'<p class="muted">직접 입력해 주세요.</p>'}<details class="ai-explanation"><summary>추천 근거</summary><p>${result.observations.map(esc).join(' · ')}</p>${displayCandidates(result.candidates).map(candidate=>`<p><strong>${esc(candidate.work)}</strong> · ${esc(candidate.reason)}</p>`).join('')}</details>` : `<p class="muted">${esc(photo.analysisError || (photo.analysisStatus==='stale'?'재분석 필요':'직접 입력 가능'))}</p>`;
     const status=card.querySelector('[data-status]');status.dataset.tone=statusFor(photo)==='확인 완료'?'success':/실패/.test(statusFor(photo))?'error':needsConfirmation(photo)?'warning':'';
     const metadata=card.querySelector('.photo-metadata');metadata.querySelector('summary').textContent=[photo.date,photo.location,photo.equipment].filter(Boolean).join(' · ')||'일자 · 위치 · 기기명';if(['date','location','equipment'].some(k=>!photo[k]?.trim()))metadata.open=true;
     card.querySelector('[data-status]').textContent = statusFor(photo) + (photo.generationError ? ': ' + photo.generationError : '');
@@ -367,7 +368,7 @@ $('#saveGroups').onclick = run(async () => {
 
 $('#changeWorkerPassword').onclick = run(async () => { await api('/api/worker-password', {password:$('#newWorkerPassword').value}); $('#newWorkerPassword').value = ''; notice('공용 비밀번호를 변경하고 기존 작업자 세션을 종료했습니다.'); });
 
-$('#saveWorkTypes').onclick = run(async () => { const workTypes = $('#workTypes').value.split('\n').map(s => s.trim()).filter(Boolean); await api('/api/work-types', {workTypes}); settings.workTypes = workTypes; $('#works').innerHTML = workTypes.map(name => `<option>${esc(name)}</option>`).join(''); notice('표준 작업 목록을 저장했습니다. 다음 AI 분석부터 적용됩니다.'); });
+$('#saveWorkTypes').onclick = run(async () => { const workTypes = $('#workTypes').value.split('\n').map(s => s.trim()).filter(Boolean); const saved=await api('/api/work-types', {workTypes}); settings.workTypes = saved.workTypes; $('#workTypes').value=settings.workTypes.join('\n');$('#works').innerHTML = settings.workTypes.map(name => `<option>${esc(name)}</option>`).join(''); notice('표준 작업 목록을 저장했습니다. 다음 AI 분석부터 적용됩니다.'); });
 
 async function browserGenerate() {
   stopRequested = false;
