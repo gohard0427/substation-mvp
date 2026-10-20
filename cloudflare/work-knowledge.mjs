@@ -1,4 +1,4 @@
-import guides from './data/work-guides.json' with {type:'json'};
+import guides from './data/work-guides.mjs';
 import {normalized} from '../shared/free-model.mjs';
 export const KNOWLEDGE_VERSION='reference-work-audit-20261020-v1';
 const aliases=new Map([['캐패시터전압측정','콘덴서전압측정'],['스크로크측정','스트로크측정']]);
