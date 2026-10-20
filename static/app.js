@@ -19,7 +19,7 @@ function notice(message, duration = 0) {
   clearTimeout(noticeTimer);
   $('#notice').textContent = message;
   const taskNotice=document.querySelector('#taskNotice');if(taskNotice)taskNotice.textContent=message;
-  if (duration) noticeTimer = setTimeout(() => { $('#notice').textContent = ''; }, duration);
+  if (duration) noticeTimer = setTimeout(() => { $('#notice').textContent = ''; if(taskNotice)taskNotice.textContent=''; }, duration);
 }
 async function api(path, data) {
   const r = await fetch(path, {method:data === undefined ? 'GET' : 'POST', headers:data === undefined ? {} : {'Content-Type':'application/json'}, body:data === undefined ? undefined : JSON.stringify(data)});
@@ -49,6 +49,7 @@ function statusFor(photo) {
   return photo.confirmed ? '확인 완료' : '확인 대기';
 }
 async function boot() {
+  $('#workspace').setAttribute('aria-busy','true');
   settings = await api('/api/settings');
   if (settings.processingMode === 'browser' && !browserEngine) browserEngine = await import('./browser-engine.mjs');
   $('#freeModeInfo').hidden = !browserEngine;
@@ -71,6 +72,7 @@ async function boot() {
     if(!job){const saved=jobs.find(j=>j.state!=='deleting'&&j.photos.some(p=>p.confirmed&&!p.excluded));if(saved)open(await api('/api/jobs/'+saved.id));}
     for(const saved of jobs)if(saved.state!=='deleting'&&saved.photos.some(p=>p.confirmed&&!p.excluded))scheduleLearning(saved.id);
   }
+  $('#workspace').setAttribute('aria-busy','false');
 }
 async function list() {
   const jobs = await api('/api/jobs');
@@ -91,6 +93,7 @@ async function resumeRequestedAnalysis(jobs) {
   notice('중단된 분석을 이어갑니다. 완료된 사진은 건너뜁니다.');
   await exclusive(analyseCurrent);
 }
+$('#togglePassword').onclick=()=>{const input=$('#password'),show=input.type==='password';input.type=show?'text':'password';$('#togglePassword').textContent=show?'숨기기':'보기';$('#togglePassword').setAttribute('aria-pressed',String(show));};
 $('#loginForm').onsubmit = async event => {
   event.preventDefault();
   try { await api('/api/login', {role:$('#role').value, password:$('#password').value}); $('#password').value = ''; await boot(); notice('로그인되었습니다.', 1500); }
@@ -135,7 +138,7 @@ function open(value) {
   if(job?.id!==value.id)photoFilter='all';
   clearTimeout(autosave); clearTimeout(poll); browserEngine?.clearPreviews();
   job = value; editEpoch = savedEpoch = 0; blocked = false;
-  $('#editor').hidden = false;
+  $('#editor').hidden = false;$('#uploadPanel').open=false;
   renderJobProject();
   $('#jobTitle').textContent = `${job.photos.length}장의 작업 사진`;
   $('#warnings').textContent = job.warnings.join(' / ');
@@ -147,14 +150,14 @@ function open(value) {
     <p data-preview-label class="muted">방향 보정 미리보기</p>
     ${p.duplicate ? '<span class="tag">중복 사진 · 유지됨</span>' : ''}
     <details class="photo-rotation"><summary>사진 회전</summary><label>자동 보정 방향에서 추가 회전<select data-key="rotation">${[0,1,2,3].map(n => `<option value="${n}" ${p.rotation === n ? 'selected' : ''}>${n === 0 ? '추가 회전 없음' : n * 90 + '° 회전'}</option>`).join('')}</select></label></details></div>
-    <div><div class="grid">${[['date','일자','date'], ['location','위치','text'], ['equipment','기기명','text']].map(([key,label,type]) => `<label>${label}<input data-key="${key}" type="${type}" value="${esc(p[key])}"></label>`).join('')}</div>
-    <label>작업 내용 · 직접 확정<input data-key="work" value="${esc(p.work)}" list="works" placeholder="사진에 해당하는 작업 하나를 입력"></label>
-    <details class="photo-options"><summary>추가 설정 · 설비 정보</summary><label>설비 타입 · 선택 입력<input data-key="equipmentType" value="${esc(p.equipmentType)}"></label><label class="check"><input data-key="measurementScene" type="checkbox" ${p.measurementScene ? 'checked' : ''}>측정 장면입니다 · 구분 필요 규칙 적용</label>
-    <label class="check" ${browserEngine ? 'hidden' : ''}><input data-key="hasExistingPlate" type="checkbox" ${p.hasExistingPlate ? 'checked' : ''}>${browserEngine ? '기존 명판이 있는 사진 · 검수 표시 (AI 사본은 기본 영역을 항상 가립니다)' : '기존 명판이 있는 사진 · AI 분석 사본에서 명판 가리기'}</label></details>
+    <div><div data-recommendations></div>
+    <label>작업 내용<input data-key="work" value="${esc(p.work)}" list="works" placeholder="사진에 해당하는 작업 하나를 입력"></label>
+    
     <div data-ambiguity class="alert" hidden><strong>작업 내용 확인 필요</strong><p data-reason></p><label>직접 선택<select data-choice></select></label><p class="muted">기타를 선택하면 위 작업 내용란에 직접 입력하세요.</p></div>
-<div data-recommendations></div>
+
     <input data-key="confirmed" type="checkbox" hidden ${p.confirmed ? 'checked' : ''}><button type="button" data-confirm>내용 확정</button>
-    <details class="photo-menu"><summary>사진 메뉴</summary><input data-key="excluded" type="checkbox" hidden ${p.excluded ? 'checked' : ''}><button type="button" class="secondary" data-exclude>이번 결과물에서 제외</button></details></div></article>`).join('');
+    <details class="photo-metadata"><summary>일자 · 위치 · 기기명</summary><div class="grid">${[['date','일자','date'], ['location','위치','text'], ['equipment','기기명','text']].map(([key,label,type]) => `<label>${label}<input data-key="${key}" type="${type}" value="${esc(p[key])}"></label>`).join('')}</div></details><details class="photo-options"><summary>추가 설정 · 설비 정보</summary><label>설비 타입 · 선택 입력<input data-key="equipmentType" value="${esc(p.equipmentType)}"></label><label class="check"><input data-key="measurementScene" type="checkbox" ${p.measurementScene ? 'checked' : ''}>측정 장면입니다 · 구분 필요 규칙 적용</label>
+    <label class="check" ${browserEngine ? 'hidden' : ''}><input data-key="hasExistingPlate" type="checkbox" ${p.hasExistingPlate ? 'checked' : ''}>${browserEngine ? '기존 명판이 있는 사진 · 검수 표시 (AI 사본은 기본 영역을 항상 가립니다)' : '기존 명판이 있는 사진 · AI 분석 사본에서 명판 가리기'}</label></details><details class="photo-menu"><summary>사진 메뉴</summary><input data-key="excluded" type="checkbox" hidden ${p.excluded ? 'checked' : ''}><button type="button" class="secondary" data-exclude>이번 결과물에서 제외</button></details></div></article>`).join('');
   scheduleLearning(job.id);
   $('#photos').oninput = onPhotoInput;
   $('#photos').onclick = event => { const action = event.target.closest('[data-confirm],[data-exclude]'); if (action) { const card=action.closest('[data-id]'); const field=card.querySelector(action.hasAttribute('data-confirm')?'[data-key="confirmed"]':'[data-key="excluded"]'); field.checked=!field.checked; onPhotoInput({target:field}); return; } const button = event.target.closest('[data-candidate]'); if (!button) return; const input = button.closest('[data-id]').querySelector('[data-key="work"]'); input.value = button.dataset.candidate; onPhotoInput({target:input}); };
@@ -169,6 +172,7 @@ function scrollToReviewPhoto() {
 for(const [id,filter] of [['showAllPhotos','all'],['showPendingPhotos','pending']]) {
   $('#'+id).onclick=()=>{photoFilter=filter;update();scrollToReviewPhoto();};
 }
+$('#nextPending').onclick=()=>{photoFilter='pending';update();scrollToReviewPhoto();};
 function onPhotoInput(event) {
   const card = event.target.closest('[data-id]'); if (!card) return;
   const photo = job.photos.find(p => p.id === card.dataset.id);
@@ -187,7 +191,7 @@ function onPhotoInput(event) {
   }
   if (key !== 'confirmed' && key !== 'excluded') { photo.confirmed = false; card.querySelector('[data-key="confirmed"]').checked = false; }
   markDirty(); update();
-  if(key==='confirmed'&&photoFilter==='pending'&&card.hidden)scrollToReviewPhoto();
+  if(key==='confirmed'&&photoFilter==='pending'&&card.hidden){const next=[...document.querySelectorAll('#photos [data-id]')].find(el=>!el.hidden&&job.photos.findIndex(p=>p.id===el.dataset.id)>job.photos.indexOf(photo));(next||document.querySelector('#photos [data-id]:not([hidden])')||$('#reviewEmpty')).scrollIntoView({block:'start'});}
 }
 function markDirty() {
   editEpoch++; job.state = 'uploaded'; job.error = '';
@@ -205,6 +209,7 @@ $('#jobProjectSelect').onchange=()=>{if(!job||busy)return;const value=$('#jobPro
 $('#jobProjectCustom').oninput=()=>{if(!job||busy)return;job.project=$('#jobProjectCustom').value;markDirty();update();};
 
 function update() {
+  $('#notice').hidden=!!job;
   $('#upload').disabled=busy;$('#restore').disabled=busy;$('#logout').disabled=busy;for(const button of document.querySelectorAll('#jobs button'))button.disabled=busy;
   if (!job) return;
   const counts = {};
@@ -218,6 +223,8 @@ function update() {
   $('#reviewEmpty').hidden=photoFilter!=='pending'||pending>0;
   $('#count').textContent = `확인 ${counts['확인 완료'] || 0} / ${selected.length}`;
   $('#reviewSummary').textContent = Object.entries(counts).map(([name,count]) => `${name} ${count}장`).join(' · ');
+  $('#nextPending').hidden=!pending||job.state==='ready';$('#nextPending').disabled=busy||blocked;
+  $('#generate').hidden=pending>0;$('#generate').className=job.state==='ready'?'secondary':'';
   const locked = busy || ['analysis_queued','analysing','queued','generating'].includes(job.state);
   $('#analyse').disabled = locked || blocked || !settings.aiConfigured || !selected.length;
   $('#jobProjectSelect').disabled=locked||blocked;$('#jobProjectCustom').disabled=locked||blocked;
@@ -252,7 +259,9 @@ function update() {
     card.querySelector('[data-preview-label]').textContent = ready ? '명판 합성 결과' : '방향 보정 미리보기';
     const result = photo.analysisStatus === 'complete' ? photo.recommendation?.result : null;
     const olderResult=result&&settings.aiPromptVersion&&result.analysisVersion!==settings.aiPromptVersion;
-    card.querySelector('[data-recommendations]').innerHTML = result ? `${olderResult?'<p class="muted">이전 추천 · 재분석 가능</p>':''}<strong>AI 추천</strong><div class="candidate-buttons">${result.candidates.map(candidate => `<button type="button" class="secondary" data-candidate="${esc(candidate.work)}" ${locked || blocked ? 'disabled' : ''}>${esc(candidate.work)}</button>`).join('')}</div>${result.candidates.length?'':'<p class="muted">직접 입력해 주세요.</p>'}<details class="ai-explanation"><summary>추천 근거</summary><p>${result.observations.map(esc).join(' · ')}</p>${result.candidates.map(candidate=>`<p><strong>${esc(candidate.work)}</strong> · ${esc(candidate.reason)}</p>`).join('')}</details>` : `<p class="muted">${esc(photo.analysisError || (photo.analysisStatus==='stale'?'재분석 필요':'직접 입력 가능'))}</p>`;
+    card.querySelector('[data-recommendations]').innerHTML = result ? `${olderResult?'<p class="muted">이전 추천 · 재분석 가능</p>':''}<strong>AI 추천</strong><div class="candidate-buttons">${result.candidates.map(candidate => `<button type="button" class="secondary" aria-pressed="${normalized(photo.work)===normalized(candidate.work)}" data-candidate="${esc(candidate.work)}" ${locked || blocked ? 'disabled' : ''}>${esc(candidate.work)}</button>`).join('')}</div>${result.candidates.length?'':'<p class="muted">직접 입력해 주세요.</p>'}<details class="ai-explanation"><summary>추천 근거</summary><p>${result.observations.map(esc).join(' · ')}</p>${result.candidates.map(candidate=>`<p><strong>${esc(candidate.work)}</strong> · ${esc(candidate.reason)}</p>`).join('')}</details>` : `<p class="muted">${esc(photo.analysisError || (photo.analysisStatus==='stale'?'재분석 필요':'직접 입력 가능'))}</p>`;
+    const status=card.querySelector('[data-status]');status.dataset.tone=statusFor(photo)==='확인 완료'?'success':/실패/.test(statusFor(photo))?'error':needsConfirmation(photo)?'warning':'';
+    const metadata=card.querySelector('.photo-metadata');metadata.querySelector('summary').textContent=[photo.date,photo.location,photo.equipment].filter(Boolean).join(' · ')||'일자 · 위치 · 기기명';if(['date','location','equipment'].some(k=>!photo[k]?.trim()))metadata.open=true;
     card.querySelector('[data-status]').textContent = statusFor(photo) + (photo.generationError ? ': ' + photo.generationError : '');
     const group = groupFor(photo), panel = card.querySelector('[data-ambiguity]'), choice = card.querySelector('[data-choice]');
     panel.hidden = !group || photo.excluded;
@@ -268,7 +277,8 @@ function update() {
     for (const input of card.querySelectorAll('input,select')) input.disabled = locked || blocked || job.state === 'deleting';
   }
   renderFreeDownloads();
-  $('#progress').textContent = job.state==='deleting'?'사진 삭제 중':blocked?'저장 충돌 · 다시 불러오세요':['generating','queued'].includes(job.state)?`명판 생성 ${job.progress||0}/${selected.length}`:['analysis_queued','analysing'].includes(job.state)?'AI 분석 중':job.state==='ready'?'생성 완료':job.error||(editEpoch!==savedEpoch?'저장 중':'자동 저장됨');
+  $('#dateDownloadPanel').hidden=!$('#browserDateDownloads').children?.length&&!$('#dateDownloads').children?.length;
+  $('#progress').textContent = job.state==='deleting'?'사진 삭제 중':blocked?'저장 충돌 · 다시 불러오세요':['generating','queued'].includes(job.state)?`명판 생성 ${job.progress||0}/${selected.length}`:['analysis_queued','analysing'].includes(job.state)?'AI 분석 중':job.state==='ready'?'생성 완료':job.error||(editEpoch!==savedEpoch?'저장 중':'저장됨');
 
 }
 function persist() {
@@ -337,7 +347,7 @@ $('#analyse').onclick = run(async () => exclusive(analyseCurrent));
 $('#generate').onclick = run(async () => exclusive(async () => { job = await api(`/api/jobs/${job.id}/generate`, {}); update(); if (browserEngine) await browserGenerate(); else if (['analysis_queued','analysing','queued','generating'].includes(job.state)) schedulePoll(); }));
 $('#finish').onclick = run(async () => {
   if (!confirm('사진을 기기에 저장했나요?\n서버의 원본·완성 사진을 삭제합니다. 복구할 수 없습니다.\n확정 기록과 참고 사본은 유지합니다.')) return;
-  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`, {}); browserEngine?.clearPreviews(); job = null; $('#editor').hidden = true; await list(); notice('작업을 종료했습니다.',2000); });
+  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`, {}); browserEngine?.clearPreviews(); job = null; $('#editor').hidden = true;$('#uploadPanel').open=true; await list(); notice('작업을 종료했습니다.',2000); });
 });
 window.addEventListener('beforeunload', event => { if (editEpoch !== savedEpoch && job) { event.preventDefault(); event.returnValue = ''; } });
 function renderGroups() {
@@ -371,25 +381,25 @@ $('#pause').onclick = run(async () => {
 });
 $('#discard').onclick = run(async () => {
   if (!confirm('이 작업과 서버의 모든 임시 사진을 삭제할까요? 삭제 후 복구할 수 없습니다.')) return;
-  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`,{}); browserEngine?.clearPreviews(); job = null; editEpoch = savedEpoch = 0; $('#editor').hidden = true; await list(); notice('작업을 종료하고 서버 파일을 삭제했습니다.'); });
+  await exclusive(async () => { scheduleLearning(job.id);await syncLearning();await api(`/api/jobs/${job.id}/finish`,{}); browserEngine?.clearPreviews(); job = null; editEpoch = savedEpoch = 0; $('#editor').hidden = true;$('#uploadPanel').open=true; await list(); notice('작업을 종료하고 서버 파일을 삭제했습니다.'); });
 });
 let freeDownloadKey = '';
 function renderFreeDownloads() {
-  const container = $('#freeDownloads');
-  if (!browserEngine || job.state !== 'ready') { container.replaceChildren(); freeDownloadKey = ''; return; }
+  const container = $('#freeDownloads'),dateContainer=$('#browserDateDownloads');
+  if (!browserEngine || job.state !== 'ready') { container.replaceChildren();dateContainer.replaceChildren(); freeDownloadKey = ''; return; }
   const key = job.id + ':' + job.revision + ':' + busy;
   if (freeDownloadKey === key) return;
-  freeDownloadKey = key; container.replaceChildren();
+  freeDownloadKey = key; container.replaceChildren();dateContainer.replaceChildren();
   for (const date of ['', ...new Set(job.photos.filter(p => !p.excluded).map(p => p.date))]) {
     const plans = browserEngine.downloadPlans(job,date);
     plans.forEach((entries,index) => {
-      const button = document.createElement('button'); button.className = 'secondary'; button.disabled = busy;
+      const button = document.createElement('button'); button.className = date?'secondary':''; button.disabled = busy;
       button.textContent = `${date || '전체'} ZIP ${plans.length > 1 ? `${index+1}/${plans.length}` : ''} 다운로드 ↓`;
       button.onclick = run(async () => exclusive(async () => {
         const blob = await browserEngine.downloadZip(job,entries,notice);
         browserEngine.saveBlob(blob,`${date || '전체'}_작업사진${plans.length>1?'_'+(index+1):''}.zip`);
         notice('다운로드 요청 완료 · 저장 후 작업을 종료하세요.');
-      })); container.append(button);
+      })); (date?dateContainer:container).append(button);
     });
   }
 }
