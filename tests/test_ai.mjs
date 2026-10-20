@@ -43,7 +43,7 @@ test('zero reviewed references still allows image analysis and lifetime cap surv
  const c=isolated.client();await c.login();let job=await(await c.request('/api/jobs',{})).json();const id='2'.repeat(24);
  job=await(await c.request(`/api/jobs/${job.id}/source/${id}`,jpeg(),{'X-Photo-Meta':encodeURIComponent(JSON.stringify({path:'folder/photo.jpg',hash:'c'.repeat(64)})),'X-Revision':String(job.revision)})).json();
  const request=()=>c.request(`/api/jobs/${job.id}/analyse/${id}`,jpeg(),{'X-Visual-Signature':JSON.stringify(values)});
- let response=await request();assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(isolated.externalCalls.length,1);assert.equal(isolated.externalCalls[0].model,DEFAULT_VISION_MODEL);assert.equal(isolated.externalCalls[0].max_output_tokens,4000);assert.equal(isolated.externalCalls[0].reasoning.effort,'low');assert.equal(job.photos[0].confirmed,false);
+ let response=await request();assert.equal(response.status,200,await response.clone().text());job=await response.json();assert.equal(isolated.externalCalls.length,1);assert.equal(isolated.externalCalls[0].model,DEFAULT_VISION_MODEL);assert.equal(isolated.externalCalls[0].max_output_tokens,6000);assert.equal(isolated.externalCalls[0].reasoning.effort,'medium');assert.equal(job.photos[0].confirmed,false);
  // Cache continues to work at the total cap.
  response=await request();assert.equal(response.status,200);job=await response.json();assert.equal(isolated.externalCalls.length,1);
  await isolated.db.exec("update np_ai_runs set created_at=now()-interval '25 hours'");

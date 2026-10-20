@@ -1,3 +1,4 @@
+import {workKey} from './work-knowledge.mjs';
 import {AppError} from './supabase-client.mjs';
 import {validateImage,validateConfirmed,normalized} from '../shared/free-model.mjs';
 import {signature,FEATURE_VERSION} from './vision.mjs';
@@ -11,7 +12,7 @@ export async function learningRoute({request,client,job,photoId,cfg,body,json}){
  if(request.headers.get('X-Learning-Signature')!==record.signature)throw new AppError('확정 정보가 변경되어 참고 사본을 다시 준비합니다.',409);
  const bytes=await body(request,262144),info=validateImage(bytes,true);if(info.width>960||info.height>720)throw new AppError('참고 사진은 최대 960×720입니다.');
  let values;try{values=signature(JSON.parse(request.headers.get('X-Visual-Signature')));}catch{throw new AppError('사진 특징을 확인하세요.');}
- const work=cfg.workTypes.find(w=>normalized(w)===normalized(photo.work));
+ const work=cfg.workTypes.find(w=>workKey(w)===workKey(photo.work));
  const args={jobId:job.id,photoId,signature:record.signature,bytes:bytes.length,path:photo.path,standardWork:work||photo.work,eligible:!!work,visualSignature:{version:FEATURE_VERSION,values}};
  const claim=await client.learningRpc('claim',args);if(claim.cached)return json({ok:true,reused:true,note:claim.note||''});
  const ref=claim.reference;

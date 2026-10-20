@@ -1,3 +1,4 @@
+import {workKey} from './work-knowledge.mjs';
 import {AppError} from './supabase-client.mjs';
 import {signature,FEATURE_VERSION,candidateReferences,recommend,analysisFingerprint,analysisHint,visionModel,equipmentContext,checkVisionConnection} from './vision.mjs';
 import {validateImage} from '../shared/free-model.mjs';
@@ -51,7 +52,7 @@ export async function analysePhoto({request,env,client,job,photoId,args,body,fet
   else{
    const workPhoto={...photo,equipmentType:analysisHint(photo)};
    ({result,usage}=await recommend({env,image:bytes,photo:workPhoto,works:cfg.workTypes,groups:cfg.ambiguityGroups,references:[],context,fetcher}));
-   const selected=candidateReferences(references,features,analysisHint(photo),result.candidates).filter(r=>cfg.workTypes.some(w=>w.replace(/\s/g,'')===r.label.work.replace(/\s/g,'')));
+   const selected=candidateReferences(references,features,analysisHint(photo),result.candidates,result.visualEvidence).filter(r=>cfg.workTypes.some(w=>workKey(w)===workKey(r.label.work)));
    if(selected.length){
     // Preserve the successful first pass and known usage before an optional comparison.
     await client.aiRpc('analysis_checkpoint',{runId:claim.run.id,result,usage});
