@@ -35,6 +35,7 @@ export const CONTRAST_FAMILIES=[
 ];
 export function contrastWorks(candidates,evidence={}){
  const keys=new Set(candidates.map(c=>workKey(c.work))),out=[];
+ const pairs={'ct절연저항측정':['CT 2차 저항 측정','제어회로 절연저항 측정'],'ct2차저항측정':['CT 절연저항 측정','코일 저항 측정'],'제어회로절연저항측정':['CT 절연저항 측정','CT 2차 저항 측정'],'코일저항측정':['CT 2차 저항 측정','히터저항 측정'],'히터저항측정':['코일 저항 측정','CT 2차 저항 측정']};for(const k of keys)out.push(...(pairs[k]||[]));
  for(const family of CONTRAST_FAMILIES)if(family.some(w=>keys.has(workKey(w))))out.push(...family);
  // Repeated worker corrections show that generic terminal inspection can hide
  // resistance/insulation measurements. Compare; do not relabel by this rule.
@@ -46,7 +47,7 @@ export function contrastWorks(candidates,evidence={}){
  if(!keys.size){if(evidence.mode==='resistance')out.push('코일 저항 측정','히터저항 측정','접촉저항 측정','CT 2차 저항 측정');else if(evidence.mode==='insulation')out.push('CT 절연저항 측정','제어회로 절연저항 측정','주회로 절연저항 측정');else if(evidence.mode==='voltage')out.push('캐패시터 전압 측정','PMA 전압 측정','축전지 전압 측정');}
  const seen=new Set();return out.filter(w=>{const k=workKey(w);if(keys.has(k)||seen.has(k))return false;seen.add(k);return true;});
 }
-export const CORRECTION_RULES=`작업자 확정 사례에서 코일 저항 측정이 일반 점검으로, CT·제어회로 절연저항 측정이 단자 점검으로 빠지는 오류가 반복됐다. 단자나 설비함이 보인다는 이유로 점검으로 축약하지 않는다. 시험봉·계측기가 보이면 연결 위치와 모드를 먼저 조사한다. 이는 해당 사진을 코일/절연저항으로 강제 분류하는 규칙이 아니다. 실제 측정 근거가 없으면 점검을 유지하거나 후보를 비운다.
+export const CORRECTION_RULES=`작업자 확정 사례에서 코일 저항 측정이 일반 점검으로, CT·제어회로 절연저항 측정이 단자 점검으로 빠지는 오류가 반복됐다. 단자나 설비함이 보인다는 이유로 점검으로 축약하지 않는다. 시험봉·계측기가 보이면 연결 위치와 모드를 먼저 조사한다. 이는 해당 사진을 코일/절연저항으로 강제 분류하는 규칙이 아니다. 실제 측정 근거가 없으면 구체적 점검 후보의 근거를 확인하거나 후보를 비운다. 단독 점검 선택지는 사용하지 않는다.
 저항 작업은 먼저 저항/절연저항/전압을 구분하고 다음으로 접촉 대상을 구분한다. Ω 표시만으로 코일을 정하지 않고, 작은 Ω 수치만으로 접촉저항을 정하지 않는다. 접촉저항은 주회로 접점·대전류 시험선·가능하면 전류선과 전압선의 분리 연결이 단서다. 코일·히터·보조저항·CT 2차 회로는 실제 연결 대상이 다르다. CT·제어회로·주회로 절연저항도 계측기가 같을 수 있으므로 확인 가능한 접촉 대상이 없으면 세부 회로를 억지로 결정하지 않는다.
 동작특성 시험 및 수분·가스 측정의 기존 판단 기준은 유지한다. 대상 기기는 사람이 안 보인다는 뜻이 아니라 작업 대상 외형을 소개하는 사진이며, 계측기 연결이나 구체적 작업 행동이 보이면 해당 작업을 먼저 검토한다. 교체 전·후, 판넬 대체 전·완료, 설치 전·완료는 외관의 신구만으로 알 수 없으며 원본 묶음 맥락도 보조 정보일 뿐이다.
 참고 사례의 작업자 확정은 관리자 검수나 절대 정답이 아니다. 신규 장면과 연결 대상이 맞는지 비교하고 서로 다른 종류의 사례가 함께 제시되어도 빈도나 배열 순서로 정답을 선택하지 않는다.`;
