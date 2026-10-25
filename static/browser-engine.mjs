@@ -2,7 +2,19 @@ import {checkZipDirectory,zipEntryPath} from '../shared/zip-safety.mjs';
 import {ZipReader,ZipWriter,BlobReader,BlobWriter} from '@zip.js/zip.js';
 import {LIMITS,PROFILE,safePath,hash,outputPaths,validateImage,formatStationName} from '../shared/free-model.mjs';
 const placeholder='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="640" height="480"%3E%3Crect width="100%25" height="100%25" fill="%23e9eeea"/%3E%3C/svg%3E';
-async function checked(response){if(!response.ok){let value={};try{value=await response.json();}catch{}const error=Error(value.error||'사진 처리 요청이 실패했습니다.');error.status=response.status;throw error;}return response;}
+async function checked(response){
+ if(response.ok)return response;
+ let value={},text='';try{text=await response.text();value=JSON.parse(text);}catch{}
+ const code=/\b1102\b|exceeded (?:CPU|resource)/i.test(text)?'EDGE_RESOURCE':/\b1101\b/.test(text)?'EDGE_EXCEPTION':`HTTP_${response.status}`;
+ const edge=!value.error;const message=value.error||(code==='EDGE_RESOURCE'?'사진 분석 서버의 처리 한도를 초과했습니다. 완료된 결과는 유지됩니다.':code==='EDGE_EXCEPTION'?'사진 분석 서버의 실행이 중단됐습니다. 완료된 결과는 유지됩니다.':'사진 서버가 일시적으로 응답하지 않습니다. 완료된 결과는 유지됩니다.');
+ const error=Error(message+(edge?` (${code})`:''));error.status=response.status;error.code=code;error.uncertain=edge&&response.status>=500;
+ const ray=response.headers.get('cf-ray');if(ray)error.requestId=ray;throw error;
+}
+async function sourceResponse(url){
+ // GET is safe to retry. Paid inference POSTs are never automatically repeated.
+ for(let attempt=0;;attempt++){try{return await checked(await fetch(url));}catch(error){if(attempt>=2||error.status&&![502,503,504,520,521,522,523,524].includes(error.status)||error.code==='EDGE_RESOURCE')throw error;await new Promise(r=>setTimeout(r,350*(attempt+1)));}}
+}
+
 function canvas(width,height){const el=document.createElement('canvas');el.width=width;el.height=height;return el;}
 function jpeg(canvas,quality=.85){return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(Error('JPEG 변환에 실패했습니다.')),'image/jpeg',quality));}
 async function bitmap(blob){const image=await createImageBitmap(blob,{imageOrientation:'from-image'});if(image.width*image.height>LIMITS.pixels){image.close();throw Error('사진은 최대 2천만 픽셀입니다.');}return image;}
@@ -123,7 +135,7 @@ export async function generate(job,api,progress,shouldStop=()=>false){
   for(const photo of job.photos.filter(p=>!p.excluded)){
    if(shouldStop())return await api(`/api/jobs/${job.id}/pause`,{});
    if(photo.hasResult)continue;
-   const source=await (await checked(await fetch(`/api/jobs/${job.id}/image/${photo.id}`))).blob();const result=await renderPhoto(source,photo,job.generation.project);
+   const source=await (await sourceResponse(`/api/jobs/${job.id}/image/${photo.id}`)).blob();const result=await renderPhoto(source,photo,job.generation.project);
    if(shouldStop())return await api(`/api/jobs/${job.id}/pause`,{});
    job=await (await checked(await fetch(`/api/jobs/${job.id}/result-upload/${photo.id}`,{method:'POST',body:result}))).json();progress(job);
   }
@@ -184,9 +196,15 @@ export async function analyse(job,api,progress,{analysisVersion}={}){
   for(const p of pending){
    progress(job,`AI 분석 중 ${done+1}/${pending.length}`);
    try{
-   const photo=job.photos.find(v=>v.id===p.id);const source=await (await checked(await fetch(`/api/jobs/${job.id}/image/${photo.id}`))).blob();const analysis=await prepareAnalysis(source,photo);
-   const response=await checked(await fetch(`/api/jobs/${job.id}/analyse/${photo.id}`,{method:'POST',headers:{'X-Visual-Signature':JSON.stringify(analysis.values)},body:analysis.blob}));job=await response.json();for(const [id,message] of failures){const failed=job.photos.find(v=>v.id===id);if(failed){failed.analysisStatus='failed';failed.analysisError=message;}}done++;progress(job);
-   }catch(error){if([401,403,409,429,503].includes(error.status))throw error;failures.set(p.id,error.message);const failed=job.photos.find(v=>v.id===p.id);failed.analysisStatus='failed';failed.analysisError=error.message;progress(job);}
+   const photo=job.photos.find(v=>v.id===p.id);const source=await (await sourceResponse(`/api/jobs/${job.id}/image/${photo.id}`)).blob();const analysis=await prepareAnalysis(source,photo);
+   let response,received;try{response=await checked(await fetch(`/api/jobs/${job.id}/analyse/${photo.id}`,{method:'POST',headers:{'X-Visual-Signature':JSON.stringify(analysis.values)},body:analysis.blob}));received=await response.json();}catch(error){
+    if(error.uncertain||error instanceof TypeError||error instanceof SyntaxError){
+     progress(job,'응답 중단 · 서버에 저장된 분석 결과 확인 중');
+     if(api){try{const saved=await api(`/api/jobs/${job.id}`);job=saved;const current=job.photos.find(v=>v.id===photo.id);if(current?.analysisStatus==='complete'&&(!analysisVersion||current.recommendation?.result?.analysisVersion===analysisVersion)){for(const [id,message] of failures){const failed=job.photos.find(v=>v.id===id);if(failed){failed.analysisStatus='failed';failed.analysisError=message;}}done++;progress(job);continue;}}catch{}}
+     error.message+=' 이 사진의 완료 여부를 확정할 수 없어 분석을 중지합니다. 잠시 후 AI 추천 다시 요청을 누르세요. 완료된 사진은 건너뜁니다.';error.stopAnalysis=true;
+    }throw error;
+   }job=received;for(const [id,message] of failures){const failed=job.photos.find(v=>v.id===id);if(failed){failed.analysisStatus='failed';failed.analysisError=message;}}done++;progress(job);
+   }catch(error){if(error.stopAnalysis||[401,403,409,429,503].includes(error.status))throw error;failures.set(p.id,error.message);const failed=job.photos.find(v=>v.id===p.id);failed.analysisStatus='failed';failed.analysisError=error.message;progress(job);}
   }progress(job,failures.size?`AI 분석 완료 · 실패 ${failures.size}장`:`AI 분석 완료 · ${done}장`);return job;
  }finally{previewsPaused=false;drainPreviews();}
 }
@@ -201,7 +219,7 @@ export async function learnConfirmed(job,api,progress=()=>{}) {
  const pending=status.photos.filter(r=>!r.ready);
  for(let i=0;i<pending.length;i++){
   const {photo,signature}=pending[i];progress(`참고 자료 저장 ${i+1}/${pending.length}장`);
-  const source=await(await checked(await fetch(`/api/jobs/${job.id}/image/${photo.id}`))).blob();
+  const source=await(await sourceResponse(`/api/jobs/${job.id}/image/${photo.id}`)).blob();
   let prepared=await prepareAnalysis(source,photo,undefined,{quality:.82});
   if(prepared.blob.size>262144)prepared=await prepareAnalysis(source,photo,undefined,{maxWidth:768,quality:.82});
   if(prepared.blob.size>262144){progress('일부 사진은 용량이 커서 수정 기록만 보관했습니다.');continue;}

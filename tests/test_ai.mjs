@@ -112,3 +112,5 @@ test('server trial switch bypasses daily, lifetime, budget caps but is not worke
  response=await request();assert.equal(response.status,200);assert.equal(isolated.externalCalls.length,1);assert.equal((await isolated.aiRpc('usage')).trialUnlimited,true);
  }finally{await isolated.db.close();}
 });
+
+test('image encoding is byte-exact for native and fallback paths including large JPEG payloads',async()=>{const {imageDataUrl}=await import('../cloudflare/vision.mjs');const bytes=Uint8Array.from({length:524288},(_,i)=>i%256);const expected='data:image/jpeg;base64,'+Buffer.from(bytes).toString('base64');assert.equal(imageDataUrl(bytes),expected);Object.defineProperty(bytes,'toBase64',{value:undefined});assert.equal(imageDataUrl(bytes),expected);});
